@@ -1,13 +1,13 @@
 // src/core/CronosEngine.ts
-// CAMBIO: PathologyEngine agregado como PRIMER engine en la cadena.
+// CAMBIO: PharmacologyEngine agregado como el motor PK/PD clínico.
 // Orden actualizado:
-// PathologyEngine → PharmaEngine → CardiovascularEngine → RespiratoryEngine
-// → AcidBaseEngine → RenalEngine → NeuroEngine → LabEngine
+// PathologyEngine → MicrobiologyEngine → PharmacologyEngine → CardiovascularEngine
+// → RespiratoryEngine → AcidBaseEngine → RenalEngine → NeuroEngine → LabEngine
 
 import { useTimeStore } from '../store/useTimeStore';
 import { MicrobiologyEngine } from './MicrobiologyEngine';
 import { PathologyEngine } from './PathologyEngine';
-import { PharmaEngine } from './PharmaEngine';
+import { PharmacologyEngine } from './PharmacologyEngine';
 import { CardiovascularEngine } from './CardiovascularEngine';
 import { RespiratoryEngine } from './RespiratoryEngine';
 import { AcidBaseEngine } from './AcidBaseEngine';
@@ -71,11 +71,9 @@ export class CronosEngine {
   private tick(dt: number): void {
     useTimeStore.getState().advanceTick(dt);
 
-    // MicrobiologyEngine PRIMERO: calcula sepsisProgressionModifier
     MicrobiologyEngine.getInstance().update(dt);
-    // PathologyEngine lee modifier → aplica a sepsis.severity
     PathologyEngine.getInstance().update(dt);
-    PharmaEngine.getInstance().update(dt);
+    PharmacologyEngine.getInstance().update(dt);
     CardiovascularEngine.getInstance().updateHemodynamics(dt);
     RespiratoryEngine.getInstance().update(dt);
     AcidBaseEngine.getInstance().update(dt);

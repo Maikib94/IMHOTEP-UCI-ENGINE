@@ -1,5 +1,5 @@
 import { usePatientStore } from '../store/usePatientStore';
-
+import { usePharmacologyStore } from '../store/usePharmacologyStore';
 const PAO2_FACTOR        = 713.0;
 const RESP_QUOTIENT      = 0.8;
 const HILL_P50           = 26.6;
@@ -78,6 +78,9 @@ export class RespiratoryEngine {
     const vent  = store.ventilator;
     const upd   = store.updateVitals;
 
+    // Inyectar Estado Farmacodinámico (PK/PD)
+    const { systemicEffects: pd } = usePharmacologyStore.getState();
+
     // ─── Guards de entrada: ningún NaN puede entrar al pipeline ──────────
     // Si vent.vt = undefined → vaActual = NaN → paCO2 = NaN → Hill(NaN) = NaN
     const fio2   = safe(vent.fio2,  0.21);
@@ -101,35 +104,41 @@ export class RespiratoryEngine {
     const hypoxiaDrive = Math.max(0, (SPO2_HYPOXIA_THR - vSpo2) * FR_HYPOXIA_COEFF);
 
     // Drive 2: Acidosis metabólica — sigmoide (Guyton Cap.42: Kussmaul)
-    // pH 7.40→~0rpm, 7.30→+4rpm, 7.25→+9rpm, 7.20→+14rpm, 7.10→+18rpm
     const acidosisDrive = FR_ACIDOSIS_MAX /
       (1 + Math.exp(PH_ACIDOSIS_STEEP * (vPH - PH_ACIDOSIS_MID)));
 
     // Drive 3: Hemodinámico — sigmoide (ATLS 11ª: taquipnea PRECOZ en shock)
-    // Quimiorreceptores del glomus carotídeo responden a ↓perfusión arterial
-    // PAM 80→~0rpm, 65→+2.2rpm, 55→+6rpm, 45→+10rpm, 35→+11rpm
     const hemodynamicDrive = FR_HEMO_MAX /
       (1 + Math.exp(MAP_HEMO_STEEP * (vMAP - MAP_HEMO_MID)));
 
     // Drive 4: Lactato directo — quimiorreceptores centrales (Pinsky)
-    // Bypasea el delay del path lactato→pH→FR del AcidBaseEngine
-    // Lac 1→0rpm, 4→+3rpm, 8→+8rpm (cap), 15→+8rpm (cap protege)
     const lactateDrive = Math.min(LAC_DRIVE_MAX,
       Math.max(0, (vLactate - LAC_DRIVE_THR) * LAC_DRIVE_COEFF));
 
     // Drive 5: Alcalosis — depresión respiratoria
     const alkalosisDrive = Math.max(0, (vPH - PH_ALKALOSIS_THR) * FR_ALKALOSIS_COEFF);
 
+    // Depresión Respiratoria Central (Opiáceos y Sedantes)
+    // Fentanilo/Morfina deprimen violentamente el centro respiratorio (bulbo raquídeo).
+    const centralDriveFactor = Math.max(0, 1.0 - pd.analgesia * 0.6 - pd.sedation * 0.3);
+
     // Target con equilibrio natural (suma de drives clampada)
-    const frTarget = FR_BASE + hypoxiaDrive + acidosisDrive
+    const rawFrTarget = FR_BASE + hypoxiaDrive + acidosisDrive
                    + hemodynamicDrive + lactateDrive - alkalosisDrive;
+                   
+    const frTarget = rawFrTarget * centralDriveFactor;
 
     // Suavizado exponencial — inercia ventilatoria (τ = 30s simulados)
-    // La FR no salta instantáneamente; onset clínico real ~2 min (4×τ ≈ 95%)
     const frSmoothed = this.frPrev + (frTarget - this.frPrev) * (1 - Math.exp(-dt / TAU_RESP));
     this.frPrev = frSmoothed;
 
-    const frSpontaneous = Math.max(FR_MIN, Math.min(FR_MAX, Math.round(frSmoothed)));
+    // Parálisis Neuromuscular (Unión Neuromuscular bloqueada o parcialmente bloqueada)
+    const muscleCapability = Math.max(0, 1.0 - pd.nmba);
+    
+    // El mínimo basal cae si hay parálisis, y el máximo también se recorta por debilidad.
+    const spontOutput = Math.max(FR_MIN * muscleCapability, Math.min(FR_MAX, Math.round(frSmoothed)));
+    const frSpontaneous = Math.round(spontOutput * muscleCapability);
+
     const frActual = Math.max(setRR, frSpontaneous);
 
     // ─── 2. Mecánica ventilatoria ─────────────────────────────────────────

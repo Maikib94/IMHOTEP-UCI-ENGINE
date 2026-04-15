@@ -108,18 +108,6 @@ export interface Vitals {
   temperature:          number;   // °C — 36.0-37.5 normal (SATI/Cárdenas)
 }
 
-export interface Infusions {
-  noradrenaline: number;
-  propofol:      number;
-  dobutamine:    number;
-}
-
-export interface ActiveDrugs {
-  noradrenaline: number;
-  propofol:      number;
-  dobutamine:    number;
-}
-
 export interface Ventilator {
   fio2:  number;
   vt:    number;
@@ -207,8 +195,6 @@ function sanitizeVentilator(partial: Partial<Ventilator>): Partial<Ventilator> {
 
 interface PatientState {
   vitals:                  Vitals;
-  infusions:               Infusions;
-  activeDrugs:             ActiveDrugs;
   bloodVolume:             number;
   hemorrhageRate:          number;
   redBloodCellMass:        number;
@@ -220,33 +206,6 @@ interface PatientState {
   labOrders:               LabOrder[];
 
   updateVitals:              (partial: Partial<Vitals>) => void;
-  setInfusion:               (drug: keyof Infusions, value: number) => void;
-  setActiveDrug:             (drug: keyof ActiveDrugs, value: number) => void;
-  setBloodVolume:            (vol: number) => void;
-  setHemorrhageRate:         (rate: number) => void;
-  setRedBloodCellMass:       (mass: number) => void;
-  setCrystalloidAccumulated: (v: number) => void;
-  setInstantResults:         (v: boolean) => void;
-  resetFluidTracking:        () => void;
-  administerFluid:           (type: FluidType, volume: number) => void;
-  setVentilator:             (partial: Partial<Ventilator>) => void;
-  addLabOrder:               (order: LabOrder) => void;
-  fulfillLabOrder:           (id: string, result: LabResult) => void;
-  clearLabOrders:            () => void;
-
-  // Aliases — Infusiones
-  setInfusionRate:        (drug: keyof Infusions, value: number) => void;
-  setMedicationRate:      (med: string, rate: number) => void;
-  setNoradrenaline:       (v: number) => void;
-  setPropofol:            (v: number) => void;
-  setDobutamine:          (v: number) => void;
-  incrementNoradrenaline: (d?: number) => void;
-  decrementNoradrenaline: (d?: number) => void;
-  incrementPropofol:      (d?: number) => void;
-  decrementPropofol:      (d?: number) => void;
-  incrementDobutamine:    (d?: number) => void;
-  decrementDobutamine:    (d?: number) => void;
-
   // Aliases — Volemia
   administerBolus: (amount?: number) => void;
   applyBolus:      (amount?: number) => void;
@@ -269,8 +228,6 @@ interface PatientState {
 
 export const usePatientStore = create<PatientState>((set) => ({
   vitals:                 { ...INITIAL_VITALS },
-  infusions:              { noradrenaline: 0, propofol: 0, dobutamine: 0 },
-  activeDrugs:            { noradrenaline: 0, propofol: 0, dobutamine: 0 },
   bloodVolume:            BV_NORMAL,
   hemorrhageRate:         0,
   redBloodCellMass:       RBC_MASS_NORMAL,
@@ -283,12 +240,6 @@ export const usePatientStore = create<PatientState>((set) => ({
 
   updateVitals: (partial) =>
     set((s) => ({ vitals: { ...s.vitals, ...sanitizeVitals(partial, s.vitals) } })),
-
-  setInfusion: (drug, value) =>
-    set((s) => ({ infusions: { ...s.infusions, [drug]: Math.max(0, value) } })),
-
-  setActiveDrug: (drug, value) =>
-    set((s) => ({ activeDrugs: { ...s.activeDrugs, [drug]: Math.max(0, value) } })),
 
   setBloodVolume:            (v) => set({ bloodVolume:            Math.max(0, v) }),
   setHemorrhageRate:         (v) => set({ hemorrhageRate:         Math.max(0, v) }),
@@ -328,31 +279,6 @@ export const usePatientStore = create<PatientState>((set) => ({
   addLabOrder:     (order)         => set((s) => ({ labOrders: [...s.labOrders, order] })),
   fulfillLabOrder: (id, result)    => set((s) => ({ labOrders: s.labOrders.map((o) => o.id === id ? { ...o, result } : o) })),
   clearLabOrders:  ()              => set({ labOrders: [] }),
-
-  setInfusionRate: (drug, value) =>
-    set((s) => ({ infusions: { ...s.infusions, [drug]: Math.max(0, value) } })),
-
-  setMedicationRate: (med, rate) =>
-    set((s) => {
-      const key = med.toLowerCase().includes('nora') ? 'noradrenaline'
-                : med.toLowerCase().includes('prop') ? 'propofol'
-                : med.toLowerCase().includes('dobu') ? 'dobutamine'
-                : (med as keyof Infusions);
-      if (key in s.infusions)
-        return { infusions: { ...s.infusions, [key]: Math.max(0, rate) } };
-      return {};
-    }),
-
-  setNoradrenaline: (v) => set((s) => ({ infusions: { ...s.infusions, noradrenaline: Math.max(0, v) } })),
-  setPropofol:      (v) => set((s) => ({ infusions: { ...s.infusions, propofol:      Math.max(0, v) } })),
-  setDobutamine:    (v) => set((s) => ({ infusions: { ...s.infusions, dobutamine:    Math.max(0, v) } })),
-
-  incrementNoradrenaline: (d = 0.05) => set((s) => ({ infusions: { ...s.infusions, noradrenaline: Math.min(3,  s.infusions.noradrenaline + d) } })),
-  decrementNoradrenaline: (d = 0.05) => set((s) => ({ infusions: { ...s.infusions, noradrenaline: Math.max(0,  s.infusions.noradrenaline - d) } })),
-  incrementPropofol:      (d = 0.5)  => set((s) => ({ infusions: { ...s.infusions, propofol:      Math.min(10, s.infusions.propofol      + d) } })),
-  decrementPropofol:      (d = 0.5)  => set((s) => ({ infusions: { ...s.infusions, propofol:      Math.max(0,  s.infusions.propofol      - d) } })),
-  incrementDobutamine:    (d = 1)    => set((s) => ({ infusions: { ...s.infusions, dobutamine:    Math.min(20, s.infusions.dobutamine    + d) } })),
-  decrementDobutamine:    (d = 1)    => set((s) => ({ infusions: { ...s.infusions, dobutamine:    Math.max(0,  s.infusions.dobutamine    - d) } })),
 
   administerBolus: (ml = 500) =>
     set((s) => ({

@@ -21,6 +21,7 @@ import { usePathologyStore, NEUTRAL_MODIFIERS } from '../store/usePathologyStore
 import type { PathologyModifiers }               from '../store/usePathologyStore';
 import { RespiratoryEngine }                     from './RespiratoryEngine';
 import { usePatientStore }                       from '../store/usePatientStore';
+import { usePharmacologyStore }                  from '../store/usePharmacologyStore';
 import { useMicrobiologyStore }                  from '../store/useMicrobiologyStore';
 
 // ─── Constantes fisiológicas ──────────────────────────────────────────────────
@@ -133,9 +134,11 @@ export class PathologyEngine {
       svrFromSepsis = Math.max(0.40, 1.0 - s * 0.60);
 
       let leak = s * LEAK_MAX_ML_MIN;
-      const noraRate      = usePatientStore.getState().infusions.noradrenaline ?? 0;
-      const noraFraction  = Math.min(1.0, noraRate / LEAK_NORA_DOSE_SATURATION);
-      leak = leak * (1.0 - noraFraction * LEAK_NORA_MAX_REDUCTION);
+      // Inyectar Estado Farmacodinámico (Vasopresores reducen leak aparente/estabilizan)
+      const { systemicEffects: pd } = usePharmacologyStore.getState();
+      
+      const vasaEffect = Math.min(1.0, pd.alpha1); 
+      leak = leak * (1.0 - vasaEffect * LEAK_NORA_MAX_REDUCTION);
       if (s > 0.80) leak = leak * LEAK_MOF_PLATEAU;
       capillaryLeakRate = Math.max(0, leak);
 

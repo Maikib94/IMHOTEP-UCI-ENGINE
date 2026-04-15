@@ -2,7 +2,7 @@
 // Blueprint 021 — Motor de Microbiología y Farmacocinética Antimicrobiana
 //
 // Tick order en CronosEngine:
-//   MicrobiologyEngine → PathologyEngine → PharmaEngine → Cardiovascular → ...
+//   MicrobiologyEngine → PathologyEngine → PharmacologyEngine → Cardiovascular → ...
 //   DEBE correr ANTES de PathologyEngine para que sepsisProgressionModifier
 //   esté actualizado cuando PathologyEngine calcule newSev.
 //
