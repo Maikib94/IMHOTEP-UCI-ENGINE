@@ -2,7 +2,7 @@ import { usePharmacologyStore, DrugId, PDSystemicEffects, DRUG_CATALOG } from '.
 
 // standardMaxDose: representa el techo típico (o dosis alta estándar) para la droga.
 // Cuando el input == standardMaxDose, el efecto normalizado (0 a 1.0) tenderá a 1.0 en estado estacionario.
-const DRUG_MAX_DOSES: Record<DrugId, number> = {
+export const DRUG_MAX_DOSES: Record<DrugId, number> = {
   // Vasopresores
   noradrenaline:   0.5,    // mcg/kg/min (0.5 es dosis alta)
   adrenaline:      0.5,    // mcg/kg/min
@@ -52,6 +52,19 @@ export class PharmacologyEngine {
   public update(dtSeconds: number): void {
     const store = usePharmacologyStore.getState();
     const { infusionRates } = store;
+
+    // ─── Procesar bolos pendientes (spike de cpRatio instantáneo) ────────
+    const pending = store.pendingBolusRatios;
+    const pendingKeys = Object.keys(pending) as DrugId[];
+    if (pendingKeys.length > 0) {
+      for (const dId of pendingKeys) {
+        const ratio = pending[dId];
+        if (ratio && ratio > 0) {
+          this.cpRatio[dId] = Math.min(3.0, (this.cpRatio[dId] || 0) + ratio);
+        }
+      }
+      store.clearPendingBolusRatios();
+    }
 
     // Mapeo PK (Primer Orden / Unicompartimental Normalizado)
     for (const dId of Object.keys(this.cpRatio) as DrugId[]) {

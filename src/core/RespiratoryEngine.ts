@@ -78,8 +78,11 @@ export class RespiratoryEngine {
     const vent  = store.ventilator;
     const upd   = store.updateVitals;
 
-    // Inyectar Estado Farmacodinámico (PK/PD)
-    const { systemicEffects: pd } = usePharmacologyStore.getState();
+    // Inyectar Estado Farmacodinámico (PK/PD) + Concentraciones Plasmáticas directas
+    const { systemicEffects: pd, plasmaConcentrations: cp } = usePharmacologyStore.getState();
+    // propofolCp: concentración plasmática normalizada (0-1) del Propofol
+    // Lectura directa para depresión respiratoria central dosis-dependiente
+    const propofolCp = cp.propofol || 0;
 
     // ─── Guards de entrada: ningún NaN puede entrar al pipeline ──────────
     // Si vent.vt = undefined → vaActual = NaN → paCO2 = NaN → Hill(NaN) = NaN
@@ -141,12 +144,21 @@ export class RespiratoryEngine {
 
     const frActual = Math.max(setRR, frSpontaneous);
 
+    // ─── Depresión respiratoria directa por Propofol ─────────────────────
+    // Propofol deprime los neuronas respiratorias del bulbo raquídeo (GABA-A)
+    // de forma dosis-dependiente e independiente del drive reflejo (Kussmaul, hipoxia).
+    // Esta penalización es visible incluso en pacientes ventilados (↓ FR efectiva).
+    // Ref: Morgan & Mikhail — Clinical Anesthesiology, 5ª Ed., Cap. 8
+    const propofolFrPenalty = Math.round(propofolCp * 6); // hasta −6 rpm a 4 mg/kg/h
+    const frFinal = Math.max(FR_MIN, frActual - propofolFrPenalty);
+
     // ─── 2. Mecánica ventilatoria ─────────────────────────────────────────
     const pplat = peep + vt / this.compliance;
     const ppico = pplat + FLOW_INSP * this.resistance;
 
     // ─── 3. PaCO2 ────────────────────────────────────────────────────────
-    const vaActual = Math.max(1, (vt - VD_ML) * frActual);
+    // Usar frFinal (con efecto Propofol) para el cálculo de ventilación alveolar
+    const vaActual = Math.max(1, (vt - VD_ML) * frFinal);
     const paCO2Tgt = PACO2_NORMAL * (VA_BASAL / vaActual);
     const rawPaCO2 = vPaCO2 + (paCO2Tgt - vPaCO2) * PACO2_K * dt;
     const paCO2    = Math.max(15, Math.min(120, safe(rawPaCO2, 40)));
@@ -189,7 +201,7 @@ export class RespiratoryEngine {
     ));
 
     upd({
-      respiratoryRate: frActual,
+      respiratoryRate: frFinal,
       paCO2:           parseFloat(paCO2.toFixed(1)),
       paO2:            parseFloat(paO2.toFixed(1)),
       spo2:            Math.round(spO2),

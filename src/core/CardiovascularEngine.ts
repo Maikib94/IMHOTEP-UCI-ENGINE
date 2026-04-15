@@ -43,8 +43,13 @@ export class CardiovascularEngine {
     const upd     = store.updateVitals;
     const setBV   = store.setBloodVolume;
 
-    // Efectos PD sistémicos (NUEVO)
-    const { systemicEffects: pd } = usePharmacologyStore.getState();
+    // Efectos PD sistémicos + concentraciones plasmáticas directas
+    const { systemicEffects: pd, plasmaConcentrations: cp } = usePharmacologyStore.getState();
+    // Lectura directa de concentración plasmática normalizada (0-1)
+    // noraCp: Noradrenalina → principal driver de pd.alpha1 → ↑ RVS → ↑ PAM
+    // propofolCp: Propofol → vasodilación sistémica + depresión miocárdica → ↓ PAM
+    const noraCp     = cp.noradrenaline || 0;
+    const propofolCp = cp.propofol      || 0;
 
     // Modificadores patológicos
     const { modifiers } = usePathologyStore.getState();
@@ -113,7 +118,16 @@ export class CardiovascularEngine {
     
     const co      = Number(((newHR * sv) / 1000).toFixed(1));
     const baseMap = Math.round((co * dynSvr) / 80 + newCVP);
-    const map     = Math.round(baseMap + pd.beta1 * 2);
+
+    // ─── Modificadores directos de PAM por fármaco ───────────────────────
+    // Noradrenalina: efecto α₁ directo sobre vasculatura de resistencia
+    // (complementa el bucle CO×RVS; hace la conexión explícita en el cálculo)
+    const mapBoostNora   = noraCp * 10;        // hasta +10 mmHg a 0.5 mcg/kg/min
+    // Propofol: vasodilación sistémica (GABA-A vascular) + inotropismo negativo
+    // Ref: Goodman & Gilman 13ª Ed., Cap. 19 — caída de PAM dosis-dependiente
+    const mapPenaltyProp = propofolCp * 15;    // hasta −15 mmHg a 4 mg/kg/h
+
+    const map = Math.round(baseMap + pd.beta1 * 2 + mapBoostNora - mapPenaltyProp);
     const dbp     = Math.round(map - 40 / 3);
     const sbp     = Math.round(dbp + 40);
 

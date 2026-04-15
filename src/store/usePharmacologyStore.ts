@@ -64,13 +64,18 @@ export type PDSystemicEffects = {
 interface PharmacologyState {
   infusionRates: Record<DrugId, number>; // La tasa exacta que ingresa el usuario en el UI
   plasmaConcentrations: Record<DrugId, number>; // Calculada: masa activa / (Vd * weight) = mcg/mL o equiv
-  
+
   // Effects agregados y publicados por el PharmacologyEngine para ser consumidos globalmente:
   systemicEffects: PDSystemicEffects;
+
+  // Bolos pendientes de procesamiento por el PharmacologyEngine (ratio normalizado acumulado)
+  pendingBolusRatios: Partial<Record<DrugId, number>>;
 
   setInfusionRate: (drug: DrugId, rate: number) => void;
   updatePlasmaConcentrations: (cpMap: Record<DrugId, number>) => void;
   updateSystemicEffects: (effects: PDSystemicEffects) => void;
+  queueBolusRatio: (drug: DrugId, ratio: number) => void;
+  clearPendingBolusRatios: () => void;
   resetAll: () => void;
 }
 
@@ -95,21 +100,33 @@ export const usePharmacologyStore = create<PharmacologyState>((set) => ({
   infusionRates: { ...INITIAL_RATES },
   plasmaConcentrations: { ...INITIAL_CP },
   systemicEffects: { ...INITIAL_EFFECTS },
+  pendingBolusRatios: {},
 
   setInfusionRate: (drug, rate) =>
     set((state) => ({
       infusionRates: { ...state.infusionRates, [drug]: rate }
     })),
-    
+
   updatePlasmaConcentrations: (cpMap) =>
     set({ plasmaConcentrations: cpMap }),
 
   updateSystemicEffects: (effects) =>
     set({ systemicEffects: effects }),
 
+  queueBolusRatio: (drug, ratio) =>
+    set((state) => ({
+      pendingBolusRatios: {
+        ...state.pendingBolusRatios,
+        [drug]: (state.pendingBolusRatios[drug] || 0) + ratio,
+      }
+    })),
+
+  clearPendingBolusRatios: () => set({ pendingBolusRatios: {} }),
+
   resetAll: () => set({
     infusionRates: { ...INITIAL_RATES },
     plasmaConcentrations: { ...INITIAL_CP },
     systemicEffects: { ...INITIAL_EFFECTS },
+    pendingBolusRatios: {},
   })
 }));
