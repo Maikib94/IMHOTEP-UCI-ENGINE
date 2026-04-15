@@ -224,6 +224,19 @@ interface PatientState {
   decrementPeep: (d?: number) => void;
   incrementVt:   (d?: number) => void;
   decrementVt:   (d?: number) => void;
+
+  // Core setters
+  setBloodVolume:             (v: number) => void;
+  setHemorrhageRate:          (v: number) => void;
+  setRedBloodCellMass:        (m: number) => void;
+  setCrystalloidAccumulated:  (v: number) => void;
+  setInstantResults:          (v: boolean) => void;
+  resetFluidTracking:         () => void;
+  administerFluid:            (type: FluidType, volume: number) => void;
+  setVentilator:              (partial: Partial<Ventilator>) => void;
+  addLabOrder:                (order: LabOrder) => void;
+  fulfillLabOrder:            (id: string, result: LabResult) => void;
+  clearLabOrders:             () => void;
 }
 
 export const usePatientStore = create<PatientState>((set) => ({

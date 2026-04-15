@@ -121,7 +121,7 @@ export class PharmacologyEngine {
     const effects: PDSystemicEffects = {
       alpha1: saturate(alpha1, 1.5, 3.0),
       beta1: saturate(beta1, 1.5, 3.0),
-      beta2: c.adrenaline * 0.5 + c.salbutamol ? 1.0 : 0, // placeholder salbutamol
+      beta2: c.adrenaline > 0 ? 1.0 : 0, // placeholder — salbutamol not yet implemented
       vasoplegiaRev: saturate(vasoplegiaRev, 2.0, 3.0),
       sedation: Math.min(2.0, sed + dex * 0.5),
       analgesia: Math.min(2.0, analg),

@@ -102,7 +102,7 @@ function PresetsGrid({ presets, onSelect, progPresets, activeProg, onProgSelect,
             cursor: 'pointer', boxShadow: RAISED, textAlign: 'center',
           }}>
             <div>{p.label}</div>
-            <div style={{ fontSize: '0.65rem', letterSpacing: '0.1em', letterSpacing: '0.04em', opacity: 0.6, fontWeight: 400 }}>{p.desc}</div>
+            <div style={{ fontSize: '0.65rem', letterSpacing: '0.04em', opacity: 0.6, fontWeight: 400 }}>{p.desc}</div>
           </button>
         ))}
       </div>
@@ -122,7 +122,7 @@ function PresetsGrid({ presets, onSelect, progPresets, activeProg, onProgSelect,
                   cursor: 'pointer', boxShadow: RAISED, textAlign: 'center',
                 }}>
                   <div>{p.label}</div>
-                  <div style={{ fontSize: '0.65rem', letterSpacing: '0.1em', letterSpacing: '0.04em', opacity: 0.6, fontWeight: 400 }}>{p.desc}</div>
+                  <div style={{ fontSize: '0.65rem', letterSpacing: '0.04em', opacity: 0.6, fontWeight: 400 }}>{p.desc}</div>
                 </button>
               );
             })}
@@ -292,7 +292,7 @@ export const InstructorPanel: React.FC = () => {
           <div style={{ color: '#38bdf8', fontWeight: 900, fontSize: '0.6rem', letterSpacing: '0.12em' }}>
             INSTRUCTOR PANEL
           </div>
-          <div style={{ color: '#334155', fontSize: '0.8rem', letterSpacing: '0.1em', letterSpacing: '0.04em', marginTop: 2 }}>F2 para cerrar</div>
+          <div style={{ color: '#334155', fontSize: '0.8rem', letterSpacing: '0.04em', marginTop: 2 }}>F2 para cerrar</div>
         </div>
 
         {/* Estado live */}
@@ -332,7 +332,7 @@ export const InstructorPanel: React.FC = () => {
                   background: item.alert ? 'rgba(239,68,68,0.08)' : 'rgba(0,0,0,0.2)',
                   border: `1px solid ${item.alert ? 'rgba(239,68,68,0.3)' : 'rgba(255,255,255,0.05)'}`,
                 }}>
-                  <div style={{ color: '#6b7a99', fontSize: '0.65rem', letterSpacing: '0.1em', letterSpacing: '0.04em' }}>{item.label}</div>
+                  <div style={{ color: '#6b7a99', fontSize: '0.65rem', letterSpacing: '0.04em' }}>{item.label}</div>
                   <div style={{ color: item.alert ? '#ef4444' : '#a3e635', fontWeight: 900, fontSize: '0.55rem', letterSpacing: '0.06em' }}>{item.value}</div>
                 </div>
               ))}
@@ -353,8 +353,8 @@ export const InstructorPanel: React.FC = () => {
                   background: item.alert ? 'rgba(239,68,68,0.08)' : 'rgba(0,0,0,0.2)',
                   border: `1px solid ${item.alert ? 'rgba(239,68,68,0.3)' : 'rgba(255,255,255,0.05)'}`,
                 }}>
-                  <div style={{ color: '#6b7a99', fontSize: '0.65rem', letterSpacing: '0.1em', letterSpacing: '0.04em' }}>{item.label}</div>
-                  <div style={{ color: item.alert ? '#ef4444' : '#34d399', fontWeight: 900, fontSize: '0.65rem', letterSpacing: '0.1em', letterSpacing: '0.04em' }}>{item.value}</div>
+                  <div style={{ color: '#6b7a99', fontSize: '0.65rem', letterSpacing: '0.04em' }}>{item.label}</div>
+                  <div style={{ color: item.alert ? '#ef4444' : '#34d399', fontWeight: 900, fontSize: '0.65rem', letterSpacing: '0.04em' }}>{item.value}</div>
                 </div>
               ))}
             </div>
@@ -419,7 +419,7 @@ export const InstructorPanel: React.FC = () => {
           <div>
             <div style={{ color: '#6b7a99', fontSize: '0.65rem', letterSpacing: '0.06em', marginBottom: 4 }}>CASO 002 — SDRA</div>
             <div style={{ background: 'rgba(163,230,53,0.06)', border: '1px solid rgba(163,230,53,0.15)', borderRadius: 5, padding: '5px 8px', marginBottom: 8 }}>
-              <span style={{ color: '#a3e635', fontSize: '0.65rem', letterSpacing: '0.1em', letterSpacing: '0.04em', lineHeight: 1.5 }}>
+              <span style={{ color: '#a3e635', fontSize: '0.65rem', letterSpacing: '0.04em', lineHeight: 1.5 }}>
                 PEEP &gt; 12: reclutamiento sigmoide activo. FiO2 sola no resuelve el shunt.
               </span>
             </div>
@@ -480,8 +480,8 @@ export const InstructorPanel: React.FC = () => {
                 <span style={{ color: atlasColor, fontFamily: MONO, fontSize: '0.55rem', letterSpacing: '0.06em' }}>{Math.round(pctLoss)}% perdida</span>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 3 }}>
-                <span style={{ color: '#6b7a99', fontFamily: MONO, fontSize: '0.65rem', letterSpacing: '0.1em', letterSpacing: '0.04em' }}>BV: {Math.round(bv)}/{BV_NORMAL} mL</span>
-                <span style={{ color: '#6b7a99', fontFamily: MONO, fontSize: '0.65rem', letterSpacing: '0.1em', letterSpacing: '0.04em' }}>Hb: {hbLive.toFixed(1)} g/dL</span>
+                <span style={{ color: '#6b7a99', fontFamily: MONO, fontSize: '0.65rem', letterSpacing: '0.04em' }}>BV: {Math.round(bv)}/{BV_NORMAL} mL</span>
+                <span style={{ color: '#6b7a99', fontFamily: MONO, fontSize: '0.65rem', letterSpacing: '0.04em' }}>Hb: {hbLive.toFixed(1)} g/dL</span>
               </div>
               <div style={{ height: 5, borderRadius: 3, background: 'rgba(0,0,0,0.4)', marginTop: 5, overflow: 'hidden' }}>
                 <div style={{
@@ -503,24 +503,24 @@ export const InstructorPanel: React.FC = () => {
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
                   {acidosisAlarm && (
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span style={{ color: '#ef4444', fontSize: '0.65rem', letterSpacing: '0.1em', letterSpacing: '0.04em' }}>ACIDOSIS</span>
-                      <span style={{ color: '#ef4444', fontSize: '0.65rem', letterSpacing: '0.1em', letterSpacing: '0.04em', opacity: 0.8 }}>
+                      <span style={{ color: '#ef4444', fontSize: '0.65rem', letterSpacing: '0.04em' }}>ACIDOSIS</span>
+                      <span style={{ color: '#ef4444', fontSize: '0.65rem', letterSpacing: '0.04em', opacity: 0.8 }}>
                         Lac {vitals.lactate.toFixed(1)} pH {vitals.pH.toFixed(2)} BE {vitals.baseExcess.toFixed(1)}
                       </span>
                     </div>
                   )}
                   {hemoDilAlarm && (
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span style={{ color: '#f97316', fontSize: '0.65rem', letterSpacing: '0.1em', letterSpacing: '0.04em' }}>HEMODILUSION</span>
-                      <span style={{ color: '#f97316', fontSize: '0.65rem', letterSpacing: '0.1em', letterSpacing: '0.04em', opacity: 0.8 }}>
+                      <span style={{ color: '#f97316', fontSize: '0.65rem', letterSpacing: '0.04em' }}>HEMODILUSION</span>
+                      <span style={{ color: '#f97316', fontSize: '0.65rem', letterSpacing: '0.04em', opacity: 0.8 }}>
                         Hb {hbLive.toFixed(1)} g/dL
                       </span>
                     </div>
                   )}
                   {critVolAlarm && (
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span style={{ color: '#ef4444', fontSize: '0.65rem', letterSpacing: '0.1em', letterSpacing: '0.04em' }}>VOL CRITICO</span>
-                      <span style={{ color: '#ef4444', fontSize: '0.65rem', letterSpacing: '0.1em', letterSpacing: '0.04em', opacity: 0.8 }}>
+                      <span style={{ color: '#ef4444', fontSize: '0.65rem', letterSpacing: '0.04em' }}>VOL CRITICO</span>
+                      <span style={{ color: '#ef4444', fontSize: '0.65rem', letterSpacing: '0.04em', opacity: 0.8 }}>
                         BV {Math.round(bv)} mL ({Math.round(pctLoss)}% perdida)
                       </span>
                     </div>
@@ -549,9 +549,9 @@ export const InstructorPanel: React.FC = () => {
                     }}
                   >
                     <div style={{ fontSize: '0.7rem', letterSpacing: '0.08em' }}>{cls.label}</div>
-                    <div style={{ fontSize: '0.65rem', letterSpacing: '0.1em', letterSpacing: '0.04em', opacity: 0.7, marginTop: 1 }}>{cls.desc}</div>
-                    <div style={{ fontSize: '0.65rem', letterSpacing: '0.1em', letterSpacing: '0.04em', opacity: 0.55, marginTop: 1 }}>{CLASS_HEMORRHAGE_RATES[cls.cls]} mL/min</div>
-                    <div style={{ fontSize: '0.65rem', letterSpacing: '0.1em', letterSpacing: '0.04em', opacity: 0.50 }}>{cls.hr}</div>
+                    <div style={{ fontSize: '0.65rem', letterSpacing: '0.04em', opacity: 0.7, marginTop: 1 }}>{cls.desc}</div>
+                    <div style={{ fontSize: '0.65rem', letterSpacing: '0.04em', opacity: 0.55, marginTop: 1 }}>{CLASS_HEMORRHAGE_RATES[cls.cls]} mL/min</div>
+                    <div style={{ fontSize: '0.65rem', letterSpacing: '0.04em', opacity: 0.50 }}>{cls.hr}</div>
                   </button>
                 );
               })}
@@ -571,7 +571,7 @@ export const InstructorPanel: React.FC = () => {
                 }}
               >
                 {hemorrhagicShock.tourniquetApplied ? 'TORNIQUETE ACTIVO — Liberar' : 'CONTROL DAÑOS / TORNIQUETE'}
-                <div style={{ fontSize: '0.65rem', letterSpacing: '0.1em', letterSpacing: '0.04em', opacity: 0.65, fontWeight: 400, marginTop: 2 }}>
+                <div style={{ fontSize: '0.65rem', letterSpacing: '0.04em', opacity: 0.65, fontWeight: 400, marginTop: 2 }}>
                   {hemorrhagicShock.tourniquetApplied
                     ? 'Sangrado detenido · BV ' + Math.round(bv) + ' mL'
                     : 'Activo: ' + hemorrhagicShock.hemorrhageRate + ' mL/min'}
@@ -587,10 +587,10 @@ export const InstructorPanel: React.FC = () => {
 
               {ratio11Needed && (
                 <div style={{ background: 'rgba(249,115,22,0.10)', border: '1px solid rgba(249,115,22,0.4)', borderRadius: 4, padding: '4px 8px', marginBottom: 6 }}>
-                  <div style={{ color: '#f97316', fontSize: '0.65rem', letterSpacing: '0.1em', letterSpacing: '0.04em', fontWeight: 900 }}>
+                  <div style={{ color: '#f97316', fontSize: '0.65rem', letterSpacing: '0.04em', fontWeight: 900 }}>
                     Protocolo 1:1:1 — GRE:{prbcUnits}U PFC:{ffpUnits}U
                   </div>
-                  <div style={{ color: '#f97316', fontSize: '0.55rem', letterSpacing: '0.1em', letterSpacing: '0.04em', opacity: 0.8, marginTop: 1 }}>
+                  <div style={{ color: '#f97316', fontSize: '0.55rem', letterSpacing: '0.04em', opacity: 0.8, marginTop: 1 }}>
                     Agregar PFC
                   </div>
                 </div>
@@ -605,7 +605,7 @@ export const InstructorPanel: React.FC = () => {
                       border: `1px solid ${active ? '#38bdf8' : 'rgba(255,255,255,0.08)'}`,
                       background: active ? 'rgba(56,189,248,0.15)' : 'rgba(0,0,0,0.3)',
                       color: active ? '#38bdf8' : '#6b7a99',
-                      fontFamily: MONO, fontSize: '0.55rem', letterSpacing: '0.1em', letterSpacing: '0.04em', fontWeight: 900, cursor: 'pointer',
+                      fontFamily: MONO, fontSize: '0.55rem', letterSpacing: '0.04em', fontWeight: 900, cursor: 'pointer',
                     }}>
                       {cat === 'cristaloide' ? 'CRISTALOIDES' : 'HEMOCOMP.'}
                     </button>
@@ -627,7 +627,7 @@ export const InstructorPanel: React.FC = () => {
                       textAlign: 'center', boxShadow: RAISED,
                     }}>
                       <div style={{ fontSize: '0.55rem', letterSpacing: '0.08em' }}>{fd.shortLabel}</div>
-                      <div style={{ fontSize: '0.55rem', letterSpacing: '0.1em', letterSpacing: '0.04em', opacity: 0.65, marginTop: 1 }}>{fd.label.split(' ')[0]}</div>
+                      <div style={{ fontSize: '0.55rem', letterSpacing: '0.04em', opacity: 0.65, marginTop: 1 }}>{fd.label.split(' ')[0]}</div>
                     </button>
                   );
                 })}
@@ -635,10 +635,10 @@ export const InstructorPanel: React.FC = () => {
 
               <div style={{ background: 'rgba(0,0,0,0.2)', borderRadius: 5, padding: '4px 8px', marginBottom: 6 }}>
                 <div style={{ color: selFluidDef.color, fontWeight: 900, fontSize: '0.55rem', letterSpacing: '0.06em' }}>{selFluidDef.label}</div>
-                <div style={{ color: '#6b7a99', fontSize: '0.55rem', letterSpacing: '0.1em', letterSpacing: '0.04em', marginTop: 1 }}>{selFluidDef.desc}</div>
+                <div style={{ color: '#6b7a99', fontSize: '0.55rem', letterSpacing: '0.04em', marginTop: 1 }}>{selFluidDef.desc}</div>
               </div>
 
-              <div style={{ color: '#6b7a99', fontSize: '0.55rem', letterSpacing: '0.1em', letterSpacing: '0.04em', marginBottom: 3 }}>{selFluidDef.volumeUnit}</div>
+              <div style={{ color: '#6b7a99', fontSize: '0.55rem', letterSpacing: '0.04em', marginBottom: 3 }}>{selFluidDef.volumeUnit}</div>
               <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', marginBottom: 8 }}>
                 {selFluidDef.volumes.map((vol) => {
                   const sel = selVolume === vol;
@@ -669,20 +669,20 @@ export const InstructorPanel: React.FC = () => {
                 }}
               >
                 {selVolume >= 1000 ? `${selVolume / 1000}L` : `${selVolume}mL`} {selFluidDef.shortLabel}
-                <div style={{ fontSize: '0.55rem', letterSpacing: '0.1em', letterSpacing: '0.04em', opacity: 0.65, fontWeight: 400, marginTop: 2 }}>
+                <div style={{ fontSize: '0.55rem', letterSpacing: '0.04em', opacity: 0.65, fontWeight: 400, marginTop: 2 }}>
                   {Math.round(bv)} mL + {selVolume}mL
                 </div>
               </button>
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4, marginTop: 6 }}>
                 <div style={{ background: 'rgba(0,0,0,0.2)', borderRadius: 4, padding: '3px 6px' }}>
-                  <div style={{ color: '#6b7a99', fontSize: '0.55rem', letterSpacing: '0.1em', letterSpacing: '0.04em' }}>Cristaloides</div>
+                  <div style={{ color: '#6b7a99', fontSize: '0.55rem', letterSpacing: '0.04em' }}>Cristaloides</div>
                   <div style={{ color: crystalloidAccum > 3000 ? '#f97316' : '#34d399', fontWeight: 900, fontSize: '0.55rem', letterSpacing: '0.06em' }}>
                     {(crystalloidAccum / 1000).toFixed(1)} L{crystalloidAccum > 3000 ? ' aviso' : ''}
                   </div>
                 </div>
                 <div style={{ background: 'rgba(0,0,0,0.2)', borderRadius: 4, padding: '3px 6px' }}>
-                  <div style={{ color: '#6b7a99', fontSize: '0.55rem', letterSpacing: '0.1em', letterSpacing: '0.04em' }}>GRE / PFC</div>
+                  <div style={{ color: '#6b7a99', fontSize: '0.55rem', letterSpacing: '0.04em' }}>GRE / PFC</div>
                   <div style={{ color: '#ef4444', fontWeight: 900, fontSize: '0.55rem', letterSpacing: '0.06em' }}>
                     {prbcUnits}U / {ffpUnits}U
                   </div>
