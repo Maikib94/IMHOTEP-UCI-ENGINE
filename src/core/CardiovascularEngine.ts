@@ -5,31 +5,31 @@
 //   Los efectos droga-específicos se modelan en DrugPDProfile (usePharmacologyStore).
 //   Esto garantiza que añadir nuevas drogas no requiera tocar este archivo.
 //
-import { usePatientStore }      from '../store/usePatientStore';
-import { usePathologyStore }    from '../store/usePathologyStore';
+import { usePatientStore } from '../store/usePatientStore';
+import { usePathologyStore } from '../store/usePathologyStore';
 import { usePharmacologyStore } from '../store/usePharmacologyStore';
 import { useMicrobiologyStore } from '../store/useMicrobiologyStore';
 
-const HR_HOMEO                = 0.05;
-const HR_MIN                  = 30;
-const HR_MAX                  = 220;
-const BV_BASE                 = 5000;
-const CVP_BASE                = 8;
-const CVP_FACTOR              = 150;
-const SV_BASE                 = 70;
-const SV_MIN                  = 10;
-const HR_COMP                 = 40;
-const HR_BASE                 = 75;
-const NOISE_INT               = 1.0;
+const HR_HOMEO = 0.05;
+const HR_MIN = 30;
+const HR_MAX = 220;
+const BV_BASE = 5000;
+const CVP_BASE = 8;
+const CVP_FACTOR = 150;
+const SV_BASE = 70;
+const SV_MIN = 10;
+const HR_COMP = 40;
+const HR_BASE = 75;
+const NOISE_INT = 1.0;
 const LUNG_COMPLIANCE_DEFAULT = 50;
-const PAW_ITT_RATIO           = 0.33;
-const PEEP_THRESHOLD          = 5;
-const SV_PEEP_PENALTY         = 0.025;
-const PEEP_CVP_TRANSMISSION   = 0.5;
-const HYPO_AMPLIFIER_FLOOR    = 4000;
-const HYPO_AMPLIFIER_SCALE    = 2000;
-const PAW_PLETH_THRESHOLD     = 10;
-const PAW_PLETH_PENALTY       = 0.03;
+const PAW_ITT_RATIO = 0.33;
+const PEEP_THRESHOLD = 10;    // BUG 2.2: PEEP > 10 cmH2O
+const SV_PEEP_PENALTY = 0.02;  // BUG 2.2: Ajustado para caída de PAM de -10 a -20%
+const PEEP_CVP_TRANSMISSION = 0.5;
+const HYPO_AMPLIFIER_FLOOR = 4000;
+const HYPO_AMPLIFIER_SCALE = 2000;
+const PAW_PLETH_THRESHOLD = 10;
+const PAW_PLETH_PENALTY = 0.03;
 
 // Constantes de recuperación logística por tratamiento antimicrobiano eficaz.
 // La recuperación hemodinámica (MAP) tarda mínimo 6h simuladas, máximo 24h.
@@ -38,17 +38,17 @@ const PAW_PLETH_PENALTY       = 0.03;
 const RECOVERY_TAU_EMPIRIC = 28800;  // τ empírico: ~8h (21600–43200 s rango clínico)
 const RECOVERY_TAU_TARGETED = 14400; // τ dirigido: ~4h (más rápido con antibiograma)
 const RECOVERY_MAP_BONUS_MAX = 12;   // mmHg de recuperación MAP máxima vs sepsis severa
-const RECOVERY_MIN_ELAPSED   = 21600; // 6h simuladas mínimas antes de beneficio visible
+const RECOVERY_MIN_ELAPSED = 21600; // 6h simuladas mínimas antes de beneficio visible
 
 export class CardiovascularEngine {
   private static instance: CardiovascularEngine | null = null;
-  private noiseTimer:          number = 0;
-  private pendingNoise:        number = 0;
+  private noiseTimer: number = 0;
+  private pendingNoise: number = 0;
   // Progreso logístico de recuperación por ATB eficaz (0–1)
-  private treatmentRecovery:   number = 0;
-  private recoveryElapsed:     number = 0;
+  private treatmentRecovery: number = 0;
+  private recoveryElapsed: number = 0;
 
-  private constructor() {}
+  private constructor() { }
 
   public static getInstance(): CardiovascularEngine {
     if (CardiovascularEngine.instance === null)
@@ -58,8 +58,9 @@ export class CardiovascularEngine {
 
   public updateHemodynamics(dt: number): void {
     const store = usePatientStore.getState();
-    const v     = store.vitals;
-    const upd   = store.updateVitals;
+    const v = store.vitals;
+    const vent = store.ventilator;
+    const upd = store.updateVitals;
     const setBV = store.setBloodVolume;
 
     // Solo leer PDSystemicEffects — nunca plasmaConcentrations aquí.
@@ -67,7 +68,9 @@ export class CardiovascularEngine {
     const { systemicEffects: pd } = usePharmacologyStore.getState();
 
     // Modificadores patológicos
-    const { modifiers } = usePathologyStore.getState();
+    const pathoStore = usePathologyStore.getState();
+    // Asumiendo que el estado de ARDS está disponible, ej: { severity: 'none' | 'mild' | 'severe' | 'ecmo_required' }
+    const { modifiers, ards } = pathoStore;
     const { svrMultiplier, hyperdynamicFactor, capillaryLeakRate } = modifiers;
 
     // ─── Volemia: hemorragia + fuga capilar séptica ───────────────────────
@@ -82,9 +85,9 @@ export class CardiovascularEngine {
     setBV(vol);
 
     // ─── Presión media vía aérea y PEEP ──────────────────────────────────
-    const peep       = store.ventilator.peep;
-    const vt         = store.ventilator.vt;
-    const paw        = peep + (vt / LUNG_COMPLIANCE_DEFAULT) * PAW_ITT_RATIO;
+    const peep = vent.peep;
+    const vt = vent.vt;
+    const paw = peep + (vt / LUNG_COMPLIANCE_DEFAULT) * PAW_ITT_RATIO;
     const peepExcess = Math.max(0, paw - PEEP_THRESHOLD);
 
     // ─── Volumen Sistólico ────────────────────────────────────────────────
@@ -95,32 +98,61 @@ export class CardiovascularEngine {
     const svPenalty = Math.min(0.85, peepExcess * SV_PEEP_PENALTY * hypoAmplifier);
     sv = Math.max(SV_MIN, sv * (1.0 - svPenalty));
     sv += pd.beta1 * 8;   // inotropismo β₁
-    sv  = Math.min(130, sv);
+
+    // BUG 2, FIX 3: Fallo cardiaco derecho (Cor Pulmonale) por SDRA Severo
+    let corPulmonaleSvrFactor = 1.0;
+    let corPulmonaleHrBonus = 0;
+    // La severidad del SDRA es un número de 0 a 1. Consideramos severo a partir de 0.6.
+    if (ards && ards.isActive && ards.severity >= 0.6) {
+      // SDRA Severo (o ECMO requerido) -> hipertensión pulmonar -> cor pulmonale agudo (fallo VD)
+      // Esto causa una caída del VS (el VD no puede bombear contra la alta presión) y
+      // conduce a hipotensión sistémica refractaria.
+      sv *= 0.80; // Caída del 20% en Volumen Sistólico por fallo del VD
+      corPulmonaleSvrFactor = 0.85; // Caída del 15% en RVS para modelar vasodilatación refractaria
+      corPulmonaleHrBonus = 15; // Taquicardia reactiva
+      // NOTA: Para simular arritmias, se podría establecer un flag aquí para el generador de ondas de ECG.
+      // ej: upd({ arrhythmia: 'rv_strain_afib' });
+    }
+
+    sv = Math.min(130, sv);
 
     // ─── CVP ─────────────────────────────────────────────────────────────
     const newCVP = Math.max(0, Math.round(
       CVP_BASE + (vol - BV_BASE) / CVP_FACTOR + peepExcess * PEEP_CVP_TRANSMISSION
     ));
 
-    // ─── FC target (barorreflejo + farmacología) ──────────────────────────
+    // ─── FC target (barorreflejo + farmacología + patología) ──────────────
     // pd.hrDirectDelta: efecto cronotrópico neto acumulado de todos los fármacos
     //   Incluye: bradicardia por dex/opioides, taquicardia por ketamina/pancuronio, etc.
     // pd.vagolytic: efecto vagolítico (pancuronio) o vagotónico (opioides) neto.
     //   Positivo → ↑FC (pancuronio), negativo ya absorbido en hrDirectDelta.
     const hrBaseSeptic = HR_BASE * hyperdynamicFactor;
-    const svDeficit    = Math.max(0, SV_BASE - sv);
+    const svDeficit = Math.max(0, SV_BASE - sv);
+
+    // BUG 2, FIX 1: Compensación por Hipoxia -> Taquicardia Reactiva
+    const pao2 = v.paO2 || 95;
+    const fio2 = vent.fio2 || 0.21;
+    const pfRatio = pao2 / fio2;
+    let hypoxicDriveHR = 0;
+    if (pfRatio < 200) { // SDRA Moderado a Severo
+      // A medida que el cociente P/F cae de 200 a 50, la FC aumenta hasta 30 lpm
+      hypoxicDriveHR = (1 - (Math.max(50, pfRatio) - 50) / 150) * 30;
+    }
+
     const targetHR =
       hrBaseSeptic
       + (BV_BASE - vol) / HR_COMP
       + pd.beta1 * 15
       + svDeficit * 0.4
       + pd.hrDirectDelta          // ← todos los efectos cronotropos del catálogo
-      + pd.vagolytic * 8;         // ← vagólisis (pancuronio) extra si positivo
+      + pd.vagolytic * 8          // ← vagólisis (pancuronio) extra si positivo
+      + hypoxicDriveHR            // ← drive hipóxico por SDRA
+      + corPulmonaleHrBonus;      // ← drive por fallo VD en SDRA severo
 
     this.noiseTimer += dt;
     let newHR = v.heartRate;
     if (this.noiseTimer >= NOISE_INT) {
-      this.noiseTimer   = 0;
+      this.noiseTimer = 0;
       this.pendingNoise = Math.random() * 2 - 1;
       const drift = (targetHR - v.heartRate) * HR_HOMEO;
       newHR = Math.round(
@@ -130,10 +162,10 @@ export class CardiovascularEngine {
 
     // ─── SVR dinámica ────────────────────────────────────────────────────
     const DynSvrAlpha = pd.alpha1 * 800;       // vasoconstrictores α₁
-    const DynSvrVaso  = pd.vasoplegiaRev * 600; // vasopresina/azul metileno
-    const dynSvr  = v.baseSvr * svrMultiplier + DynSvrAlpha + DynSvrVaso;
+    const DynSvrVaso = pd.vasoplegiaRev * 600; // vasopresina/azul metileno
+    const dynSvr = v.baseSvr * svrMultiplier * corPulmonaleSvrFactor + DynSvrAlpha + DynSvrVaso;
 
-    const co      = Number(((newHR * sv) / 1000).toFixed(1));
+    const co = Number(((newHR * sv) / 1000).toFixed(1));
     const baseMap = Math.round((co * dynSvr) / 80 + newCVP);
 
     // ─── Recuperación hemodinámica logística por antimicrobianos eficaces ───
@@ -189,15 +221,15 @@ export class CardiovascularEngine {
     pleth = Math.max(0.03, Math.min(1.5, pleth));
 
     upd({
-      cardiacOutput:        co,
-      svr:                  Math.round(dynSvr),
-      cvp:                  newCVP,
-      strokeVolume:         Math.round(sv),
+      cardiacOutput: co,
+      svr: Math.round(dynSvr),
+      cvp: newCVP,
+      strokeVolume: Math.round(sv),
       meanArterialPressure: map,
-      systolicBP:           sbp,
-      diastolicBP:          dbp,
-      heartRate:            newHR,
-      plethAmplitude:       Math.round(pleth * 100) / 100,
+      systolicBP: sbp,
+      diastolicBP: dbp,
+      heartRate: newHR,
+      plethAmplitude: Math.round(pleth * 100) / 100,
       ...this.computeTemperature(store.vitals.temperature, vol, pd.thermoDepression, dt),
     });
   }
@@ -212,10 +244,10 @@ export class CardiovascularEngine {
   //      Matsukawa T et al. — Propofol linearly reduces threshold and gain.
   //      Anesthesiology 1995;83(5):1169-79.
   private computeTemperature(
-    currentTemp:     number,
-    bv:              number,
+    currentTemp: number,
+    bv: number,
     thermoDepression: number,  // neto del catálogo: 0–1 hipotermia, negativo = ketamina
-    dt:              number,
+    dt: number,
   ): { temperature: number } {
     // Hipotermia por hemorragia (pérdida de calor + disminución perfusión periférica)
     const pctLoss = Math.max(0, (BV_BASE - bv) / BV_BASE);
@@ -231,7 +263,7 @@ export class CardiovascularEngine {
     const targetTemp = 37.0 - hemorrHypothermia + pharmOffset;
 
     // τ = 600s simulados → suavizado lento (cambio de temperatura es gradual)
-    const tau  = 600;
+    const tau = 600;
     const newT = currentTemp + (targetTemp - currentTemp) * (1 - Math.exp(-dt / tau));
     return { temperature: Math.round(Math.max(28.0, Math.min(41.5, newT)) * 10) / 10 };
   }

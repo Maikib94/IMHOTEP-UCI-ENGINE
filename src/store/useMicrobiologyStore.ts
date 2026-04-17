@@ -612,6 +612,7 @@ export const PATHOGEN_CATALOG: Record<string, PathogenDef> = {
 export interface AntibioticDef {
   id:                   string;
   displayName:          string;
+  fullName:             string;   // Nombre completo sin dosis (ej: "Piperacilina/Tazobactam")
   shortName:            string;   // Monitor: CRO, MEM, VAN...
   class:                string;
   pkpdType:             PKPDType;
@@ -633,6 +634,7 @@ export const ANTIBIOTIC_CATALOG: Record<string, AntibioticDef> = {
   // ─── PENICILINAS ──────────────────────────────────────────────────────────
   ampicillin: {
     id: 'ampicillin', displayName: 'Ampicilina 2g IV c/4h',
+    fullName: 'Ampicilina',
     shortName: 'AMP', class: 'Aminopenicilina',
     pkpdType: 'time', peakConcentration: 125, halfLifeHours: 1, doseIntervalHours: 4,
     doseStandard: '2g IV c/4h (meningitis: 2g c/4h × 3 semanas)',
@@ -644,6 +646,7 @@ export const ANTIBIOTIC_CATALOG: Record<string, AntibioticDef> = {
 
   oxacillin: {
     id: 'oxacillin', displayName: 'Oxacilina 2g IV c/4h',
+    fullName: 'Oxacilina',
     shortName: 'OXA', class: 'Penicilina antiestafilocócica',
     pkpdType: 'time', peakConcentration: 45, halfLifeHours: 0.5, doseIntervalHours: 4,
     doseStandard: '2g IV c/4h',
@@ -655,6 +658,7 @@ export const ANTIBIOTIC_CATALOG: Record<string, AntibioticDef> = {
 
   cloxacillin: {
     id: 'cloxacillin', displayName: 'Cloxacilina 2g IV c/6h',
+    fullName: 'Cloxacilina',
     shortName: 'CLO', class: 'Penicilina antiestafilocócica',
     pkpdType: 'time', peakConcentration: 40, halfLifeHours: 0.5, doseIntervalHours: 6,
     doseStandard: '2g IV c/6h',
@@ -666,6 +670,7 @@ export const ANTIBIOTIC_CATALOG: Record<string, AntibioticDef> = {
 
   amp_sulbac: {
     id: 'amp_sulbac', displayName: 'Ampicilina/Sulbactam 3g IV c/6h',
+    fullName: 'Ampicilina/Sulbactam',
     shortName: 'AMS', class: 'Aminopenicilina + IBL',
     pkpdType: 'time', peakConcentration: 150, halfLifeHours: 1, doseIntervalHours: 6,
     doseStandard: '3g IV c/6h (A. baumannii XDR: 9g/día en inf. extendida)',
@@ -677,6 +682,7 @@ export const ANTIBIOTIC_CATALOG: Record<string, AntibioticDef> = {
 
   amoxicillin_clav: {
     id: 'amoxicillin_clav', displayName: 'Amoxicilina/Clavulánico 1.2g IV c/8h',
+    fullName: 'Amoxicilina/Clavulánico',
     shortName: 'AMC', class: 'Aminopenicilina + IBL',
     pkpdType: 'time', peakConcentration: 60, halfLifeHours: 1, doseIntervalHours: 8,
     doseStandard: '1.2g IV c/8h',
@@ -688,6 +694,7 @@ export const ANTIBIOTIC_CATALOG: Record<string, AntibioticDef> = {
 
   pip_tazo: {
     id: 'pip_tazo', displayName: 'Piperacilina/Tazobactam 4.5g IV c/6h',
+    fullName: 'Piperacilina/Tazobactam',
     shortName: 'PTZ', class: 'Ureidopenicilina + IBL',
     pkpdType: 'time', peakConcentration: 300, halfLifeHours: 1, doseIntervalHours: 6,
     doseStandard: '4.5g IV c/6h (extendida: 4.5g en 4h c/6h)',
@@ -700,6 +707,7 @@ export const ANTIBIOTIC_CATALOG: Record<string, AntibioticDef> = {
   // ─── CEFALOSPORINAS ───────────────────────────────────────────────────────
   cefazolin: {
     id: 'cefazolin', displayName: 'Cefazolina 2g IV c/8h',
+    fullName: 'Cefazolina',
     shortName: 'CFZ', class: 'Cefalosporina 1G',
     pkpdType: 'time', peakConcentration: 185, halfLifeHours: 1.8, doseIntervalHours: 8,
     doseStandard: '2g IV c/8h (profilaxis quirúrgica: 2g previo a incisión)',
@@ -711,6 +719,7 @@ export const ANTIBIOTIC_CATALOG: Record<string, AntibioticDef> = {
 
   ceftriaxone: {
     id: 'ceftriaxone', displayName: 'Ceftriaxona 2g IV c/24h',
+    fullName: 'Ceftriaxona',
     shortName: 'CRO', class: 'Cefalosporina 3G',
     pkpdType: 'time', peakConcentration: 250, halfLifeHours: 8, doseIntervalHours: 24,
     doseStandard: '2g IV c/24h (meningitis: 2g c/12h)',
@@ -722,6 +731,7 @@ export const ANTIBIOTIC_CATALOG: Record<string, AntibioticDef> = {
 
   cefotaxime: {
     id: 'cefotaxime', displayName: 'Cefotaxime 2g IV c/8h',
+    fullName: 'Cefotaxima',
     shortName: 'CTX', class: 'Cefalosporina 3G',
     pkpdType: 'time', peakConcentration: 100, halfLifeHours: 1, doseIntervalHours: 8,
     doseStandard: '2g IV c/8h (meningitis: 2g c/4h)',
@@ -733,6 +743,7 @@ export const ANTIBIOTIC_CATALOG: Record<string, AntibioticDef> = {
 
   ceftazidime: {
     id: 'ceftazidime', displayName: 'Ceftazidima 2g IV c/8h',
+    fullName: 'Ceftazidima',
     shortName: 'CAZ', class: 'Cefalosporina 3G anti-Pseudomonas',
     pkpdType: 'time', peakConcentration: 100, halfLifeHours: 1.6, doseIntervalHours: 8,
     doseStandard: '2g IV c/8h',
@@ -744,6 +755,7 @@ export const ANTIBIOTIC_CATALOG: Record<string, AntibioticDef> = {
 
   cefepime: {
     id: 'cefepime', displayName: 'Cefepime 2g IV c/8h',
+    fullName: 'Cefepime',
     shortName: 'FEP', class: 'Cefalosporina 4G',
     pkpdType: 'time', peakConcentration: 160, halfLifeHours: 2, doseIntervalHours: 8,
     doseStandard: '2g IV c/8h (NAV/pseudomónica: 2g c/8h en inf. extendida)',
@@ -755,6 +767,7 @@ export const ANTIBIOTIC_CATALOG: Record<string, AntibioticDef> = {
 
   ceftazidime_avi: {
     id: 'ceftazidime_avi', displayName: 'Ceftazidima/Avibactam 2.5g IV c/8h',
+    fullName: 'Ceftazidima/Avibactam',
     shortName: 'CZA', class: 'Cefalosporina 3G + INBL nueva generación',
     pkpdType: 'time', peakConcentration: 60, halfLifeHours: 2, doseIntervalHours: 8,
     doseStandard: '2.5g IV c/8h (en 2h de infusión)',
@@ -766,6 +779,7 @@ export const ANTIBIOTIC_CATALOG: Record<string, AntibioticDef> = {
 
   ceftolozane_tazo: {
     id: 'ceftolozane_tazo', displayName: 'Ceftolozano/Tazobactam 1.5g IV c/8h',
+    fullName: 'Ceftolozano/Tazobactam',
     shortName: 'CTO', class: 'Cefalosporina + IBL (anti-Pseudomonas)',
     pkpdType: 'time', peakConcentration: 70, halfLifeHours: 3, doseIntervalHours: 8,
     doseStandard: '1.5g IV c/8h (NAV: 3g c/8h en 1h)',
@@ -778,6 +792,7 @@ export const ANTIBIOTIC_CATALOG: Record<string, AntibioticDef> = {
   // ─── CARBAPENEMS ──────────────────────────────────────────────────────────
   meropenem: {
     id: 'meropenem', displayName: 'Meropenem 1g IV c/8h',
+    fullName: 'Meropenem',
     shortName: 'MEM', class: 'Carbapenémico',
     pkpdType: 'time', peakConcentration: 50, halfLifeHours: 1, doseIntervalHours: 8,
     doseStandard: '1g IV c/8h (BLEE: 2g c/8h en 3h; meningitis: 2g c/8h)',
@@ -789,6 +804,7 @@ export const ANTIBIOTIC_CATALOG: Record<string, AntibioticDef> = {
 
   imipenem: {
     id: 'imipenem', displayName: 'Imipenem/Cilastatina 500mg IV c/6h',
+    fullName: 'Imipenem/Cilastatina',
     shortName: 'IMI', class: 'Carbapenémico',
     pkpdType: 'time', peakConcentration: 30, halfLifeHours: 1, doseIntervalHours: 6,
     doseStandard: '500mg IV c/6h (1g c/6h en infecciones graves)',
@@ -800,6 +816,7 @@ export const ANTIBIOTIC_CATALOG: Record<string, AntibioticDef> = {
 
   ertapenem: {
     id: 'ertapenem', displayName: 'Ertapenem 1g IV c/24h',
+    fullName: 'Ertapenem',
     shortName: 'ERT', class: 'Carbapenémico (1× día)',
     pkpdType: 'time', peakConcentration: 155, halfLifeHours: 4, doseIntervalHours: 24,
     doseStandard: '1g IV c/24h (o IM en ambulatorio)',
@@ -811,6 +828,7 @@ export const ANTIBIOTIC_CATALOG: Record<string, AntibioticDef> = {
 
   meropenem_vaborbactam: {
     id: 'meropenem_vaborbactam', displayName: 'Meropenem/Vaborbactam 2g IV c/8h (3h)',
+    fullName: 'Meropenem/Vaborbactam',
     shortName: 'MVB', class: 'Carbapenémico + INBL cicloboronato',
     pkpdType: 'time', peakConcentration: 50, halfLifeHours: 1.5, doseIntervalHours: 8,
     doseStandard: '2g IV c/8h en 3h de infusión',
@@ -823,6 +841,7 @@ export const ANTIBIOTIC_CATALOG: Record<string, AntibioticDef> = {
   // ─── AMINOGLUCÓSIDOS ──────────────────────────────────────────────────────
   amikacin: {
     id: 'amikacin', displayName: 'Amikacina 15-20mg/kg IV c/24h',
+    fullName: 'Amikacina',
     shortName: 'AMK', class: 'Aminoglucósido',
     pkpdType: 'conc', peakConcentration: 65, halfLifeHours: 2, doseIntervalHours: 24,
     doseStandard: '15-20 mg/kg IV c/24h (dosis única diaria)',
@@ -834,6 +853,7 @@ export const ANTIBIOTIC_CATALOG: Record<string, AntibioticDef> = {
 
   gentamicin: {
     id: 'gentamicin', displayName: 'Gentamicina 5-7mg/kg IV c/24h',
+    fullName: 'Gentamicina',
     shortName: 'GEN', class: 'Aminoglucósido',
     pkpdType: 'conc', peakConcentration: 25, halfLifeHours: 2, doseIntervalHours: 24,
     doseStandard: '5-7 mg/kg IV c/24h (monodosis)',
@@ -845,6 +865,7 @@ export const ANTIBIOTIC_CATALOG: Record<string, AntibioticDef> = {
 
   tobramycin: {
     id: 'tobramycin', displayName: 'Tobramicina 7mg/kg IV c/24h',
+    fullName: 'Tobramicina',
     shortName: 'TOB', class: 'Aminoglucósido',
     pkpdType: 'conc', peakConcentration: 25, halfLifeHours: 2, doseIntervalHours: 24,
     doseStandard: '7mg/kg IV c/24h',
@@ -857,6 +878,7 @@ export const ANTIBIOTIC_CATALOG: Record<string, AntibioticDef> = {
   // ─── GLUCOPÉPTIDOS ────────────────────────────────────────────────────────
   vancomycin: {
     id: 'vancomycin', displayName: 'Vancomicina IV (AUC-guiada)',
+    fullName: 'Vancomicina',
     shortName: 'VAN', class: 'Glucopéptido',
     pkpdType: 'auc', peakConcentration: 40, halfLifeHours: 6, doseIntervalHours: 12,
     doseStandard: '25-30 mg/kg/día en 2-3 dosis (objetivo AUC24/MIC 400-600)',
@@ -868,6 +890,7 @@ export const ANTIBIOTIC_CATALOG: Record<string, AntibioticDef> = {
 
   teicoplanin: {
     id: 'teicoplanin', displayName: 'Teicoplanina 6mg/kg IV c/12h × 3 dosis, luego c/24h',
+    fullName: 'Teicoplanina',
     shortName: 'TEI', class: 'Glucopéptido',
     pkpdType: 'auc', peakConcentration: 50, halfLifeHours: 70, doseIntervalHours: 24,
     doseStandard: '6mg/kg IV c/12h × 3 dosis de carga, luego 6mg/kg c/24h',
@@ -879,6 +902,7 @@ export const ANTIBIOTIC_CATALOG: Record<string, AntibioticDef> = {
 
   dalbavancin: {
     id: 'dalbavancin', displayName: 'Dalbavancina 1500mg IV (dosis única) o 1000mg + 500mg',
+    fullName: 'Dalbavancina',
     shortName: 'DAL', class: 'Glucopéptido lipofílico (2G)',
     pkpdType: 'auc', peakConcentration: 280, halfLifeHours: 336, doseIntervalHours: 168,
     doseStandard: '1500mg IV dosis única (o 1000mg día 1 + 500mg día 8)',
@@ -891,6 +915,7 @@ export const ANTIBIOTIC_CATALOG: Record<string, AntibioticDef> = {
   // ─── OXAZOLIDINONAS ───────────────────────────────────────────────────────
   linezolid: {
     id: 'linezolid', displayName: 'Linezolid 600mg IV/VO c/12h',
+    fullName: 'Linezolid',
     shortName: 'LZD', class: 'Oxazolidinona',
     pkpdType: 'auc', peakConcentration: 18, halfLifeHours: 5.5, doseIntervalHours: 12,
     doseStandard: '600mg IV o VO c/12h',
@@ -903,6 +928,7 @@ export const ANTIBIOTIC_CATALOG: Record<string, AntibioticDef> = {
   // ─── QUINOLONAS ───────────────────────────────────────────────────────────
   ciprofloxacin: {
     id: 'ciprofloxacin', displayName: 'Ciprofloxacina 400mg IV c/8h',
+    fullName: 'Ciprofloxacina',
     shortName: 'CIP', class: 'Fluoroquinolona',
     pkpdType: 'auc', peakConcentration: 5, halfLifeHours: 4, doseIntervalHours: 8,
     doseStandard: '400mg IV c/8h (400mg c/12h en ITU)',
@@ -914,6 +940,7 @@ export const ANTIBIOTIC_CATALOG: Record<string, AntibioticDef> = {
 
   levofloxacin: {
     id: 'levofloxacin', displayName: 'Levofloxacina 750mg IV/VO c/24h',
+    fullName: 'Levofloxacina',
     shortName: 'LEV', class: 'Fluoroquinolona',
     pkpdType: 'auc', peakConcentration: 12, halfLifeHours: 7, doseIntervalHours: 24,
     doseStandard: '750mg IV c/24h (NAC: 500-750mg c/24h)',
@@ -926,6 +953,7 @@ export const ANTIBIOTIC_CATALOG: Record<string, AntibioticDef> = {
   // ─── OTROS ANTIBACTERIANOS ────────────────────────────────────────────────
   metronidazole: {
     id: 'metronidazole', displayName: 'Metronidazol 500mg IV c/8h',
+    fullName: 'Metronidazol',
     shortName: 'MTZ', class: 'Nitroimidazol (antianaeróbico)',
     pkpdType: 'auc', peakConcentration: 25, halfLifeHours: 8, doseIntervalHours: 8,
     doseStandard: '500mg IV c/8h (C. difficile: 500mg VO c/8h × 10 días)',
@@ -937,6 +965,7 @@ export const ANTIBIOTIC_CATALOG: Record<string, AntibioticDef> = {
 
   tmp_smx: {
     id: 'tmp_smx', displayName: 'Trimetoprim/Sulfametoxazol 5mg/kg/TMP IV c/6-8h',
+    fullName: 'Trimetoprim/Sulfametoxazol',
     shortName: 'TMP', class: 'Sulfamida + Antimetabolito folato',
     pkpdType: 'time', peakConcentration: 10, halfLifeHours: 10, doseIntervalHours: 8,
     doseStandard: '5mg/kg (de TMP) IV c/6-8h (PCP: 15-20mg/kg/día en 3-4 dosis)',
@@ -948,6 +977,7 @@ export const ANTIBIOTIC_CATALOG: Record<string, AntibioticDef> = {
 
   tigecycline: {
     id: 'tigecycline', displayName: 'Tigeciclina 100mg IV (carga), luego 50mg c/12h',
+    fullName: 'Tigeciclina',
     shortName: 'TIG', class: 'Glicilciclina',
     pkpdType: 'auc', peakConcentration: 0.87, halfLifeHours: 42, doseIntervalHours: 12,
     doseStandard: '100mg IV carga, luego 50mg c/12h',
@@ -959,6 +989,7 @@ export const ANTIBIOTIC_CATALOG: Record<string, AntibioticDef> = {
 
   colistin: {
     id: 'colistin', displayName: 'Colistina (CMS) 9M UI carga, luego 4.5M UI c/12h',
+    fullName: 'Colistina',
     shortName: 'COL', class: 'Polimixina B/E',
     pkpdType: 'conc', peakConcentration: 12, halfLifeHours: 5, doseIntervalHours: 12,
     doseStandard: '9M UI IV carga, luego 4.5M UI c/12h (ajustar a CrCl)',
@@ -970,6 +1001,7 @@ export const ANTIBIOTIC_CATALOG: Record<string, AntibioticDef> = {
 
   fosfomycin: {
     id: 'fosfomycin', displayName: 'Fosfomicina 8g IV c/8h',
+    fullName: 'Fosfomicina',
     shortName: 'FOS', class: 'Antibacteriano (inhibidor pared, único mecanismo)',
     pkpdType: 'time', peakConcentration: 260, halfLifeHours: 4, doseIntervalHours: 8,
     doseStandard: '8g IV c/8h (uso combinado obligatorio)',
@@ -981,6 +1013,7 @@ export const ANTIBIOTIC_CATALOG: Record<string, AntibioticDef> = {
 
   daptomycin: {
     id: 'daptomycin', displayName: 'Daptomicina 6-10mg/kg IV c/24h',
+    fullName: 'Daptomicina',
     shortName: 'DAP', class: 'Lipopéptido cíclico',
     pkpdType: 'conc', peakConcentration: 100, halfLifeHours: 9, doseIntervalHours: 24,
     doseStandard: '6mg/kg/día (bacteriemia MRSA); 10mg/kg/día (endocarditis derecha)',
@@ -993,6 +1026,7 @@ export const ANTIBIOTIC_CATALOG: Record<string, AntibioticDef> = {
   // ─── ANTIFÚNGICOS ─────────────────────────────────────────────────────────
   fluconazole: {
     id: 'fluconazole', displayName: 'Fluconazol 400-800mg IV/VO c/24h',
+    fullName: 'Fluconazol',
     shortName: 'FLU', class: 'Antifúngico azólico',
     pkpdType: 'auc', peakConcentration: 12, halfLifeHours: 30, doseIntervalHours: 24,
     doseStandard: '400-800mg IV c/24h (carga: 800mg el día 1)',
@@ -1004,6 +1038,7 @@ export const ANTIBIOTIC_CATALOG: Record<string, AntibioticDef> = {
 
   caspofungin: {
     id: 'caspofungin', displayName: 'Caspofungina 70mg IV (carga), luego 50mg c/24h',
+    fullName: 'Caspofungina',
     shortName: 'CAS', class: 'Antifúngico equinocandina',
     pkpdType: 'auc', peakConcentration: 12, halfLifeHours: 10, doseIntervalHours: 24,
     doseStandard: '70mg IV carga, luego 50mg IV c/24h',
@@ -1015,6 +1050,7 @@ export const ANTIBIOTIC_CATALOG: Record<string, AntibioticDef> = {
 
   micafungin: {
     id: 'micafungin', displayName: 'Micafungina 100mg IV c/24h',
+    fullName: 'Micafungina',
     shortName: 'MFG', class: 'Antifúngico equinocandina',
     pkpdType: 'auc', peakConcentration: 10, halfLifeHours: 15, doseIntervalHours: 24,
     doseStandard: '100mg IV c/24h',
@@ -1026,6 +1062,7 @@ export const ANTIBIOTIC_CATALOG: Record<string, AntibioticDef> = {
 
   amphotericin_b: {
     id: 'amphotericin_b', displayName: 'Anfotericina B liposomal 3-5mg/kg IV c/24h',
+    fullName: 'Anfotericina B liposomal',
     shortName: 'AMB', class: 'Antifúngico poliénico',
     pkpdType: 'conc', peakConcentration: 50, halfLifeHours: 24, doseIntervalHours: 24,
     doseStandard: '3-5mg/kg IV c/24h (liposomal — L-AmB)',
@@ -1037,6 +1074,7 @@ export const ANTIBIOTIC_CATALOG: Record<string, AntibioticDef> = {
 
   voriconazole: {
     id: 'voriconazole', displayName: 'Voriconazol 6mg/kg IV c/12h × 2 dosis, luego 4mg/kg c/12h',
+    fullName: 'Voriconazol',
     shortName: 'VOR', class: 'Antifúngico triazólico 2G',
     pkpdType: 'auc', peakConcentration: 4, halfLifeHours: 6, doseIntervalHours: 12,
     doseStandard: '6mg/kg IV c/12h × 2 dosis de carga, luego 4mg/kg c/12h',
@@ -1049,6 +1087,7 @@ export const ANTIBIOTIC_CATALOG: Record<string, AntibioticDef> = {
   // ─── ANTIBIÓTICOS RESCATE / ÚLTIMA LÍNEA ──────────────────────────────────
   cefiderocol: {
     id: 'cefiderocol', displayName: 'Cefiderocol 2g IV c/8h (3h)',
+    fullName: 'Cefiderocol',
     shortName: 'FDC', class: 'Cefalosporina siderófora (última línea)',
     pkpdType: 'time', peakConcentration: 35, halfLifeHours: 2.5, doseIntervalHours: 8,
     doseStandard: '2g IV c/8h en 3h de infusión',
@@ -1060,6 +1099,7 @@ export const ANTIBIOTIC_CATALOG: Record<string, AntibioticDef> = {
 
   rifampicin: {
     id: 'rifampicin', displayName: 'Rifampicina 600mg IV c/12h',
+    fullName: 'Rifampicina',
     shortName: 'RIF', class: 'Rifamicina (antituberculoso/combinación)',
     pkpdType: 'auc', peakConcentration: 12, halfLifeHours: 3, doseIntervalHours: 12,
     doseStandard: '600mg IV c/12h (en combinación)',
@@ -1073,6 +1113,7 @@ export const ANTIBIOTIC_CATALOG: Record<string, AntibioticDef> = {
 
   aztreonam: {
     id: 'aztreonam', displayName: 'Aztreonam 2g IV c/6-8h',
+    fullName: 'Aztreonam',
     shortName: 'ATM', class: 'Monobactam',
     pkpdType: 'time', peakConcentration: 125, halfLifeHours: 1.5, doseIntervalHours: 8,
     doseStandard: '2g IV c/6-8h (combinación con CAZ-AVI en MBL: 6-8g/día fraccionado)',
@@ -1089,6 +1130,7 @@ export const ANTIBIOTIC_CATALOG: Record<string, AntibioticDef> = {
 
   aztreonam_avi: {
     id: 'aztreonam_avi', displayName: 'Aztreonam/Avibactam 6g IV c/8h (3h)',
+    fullName: 'Aztreonam/Avibactam',
     shortName: 'ATM-AVI', class: 'Monobactam + INBL (anti-MBL)',
     pkpdType: 'time', peakConcentration: 55, halfLifeHours: 1.5, doseIntervalHours: 8,
     doseStandard: '6g IV c/8h en 3h de infusión (aztreonam 4g + avibactam 2g)',
@@ -1106,6 +1148,7 @@ export const ANTIBIOTIC_CATALOG: Record<string, AntibioticDef> = {
 
   imipenem_relebactam: {
     id: 'imipenem_relebactam', displayName: 'Imipenem/Cilastatina/Relebactam 1.25g IV c/6h',
+    fullName: 'Imipenem/Relebactam',
     shortName: 'IMI-REL', class: 'Carbapenémico + INBL piperidine',
     pkpdType: 'time', peakConcentration: 45, halfLifeHours: 1, doseIntervalHours: 6,
     doseStandard: '1.25g IV c/6h (500mg IMI + 250mg REL en 30 min)',
@@ -1123,6 +1166,7 @@ export const ANTIBIOTIC_CATALOG: Record<string, AntibioticDef> = {
 
   cefepime_enmetazobactam: {
     id: 'cefepime_enmetazobactam', displayName: 'Cefepime/Enmetazobactam 2.5g IV c/8h',
+    fullName: 'Cefepime/Enmetazobactam',
     shortName: 'FEP-ETZ', class: 'Cefalosporina 4G + INBL pirrolidine',
     pkpdType: 'time', peakConcentration: 45, halfLifeHours: 2, doseIntervalHours: 8,
     doseStandard: '2g FEP + 0.5g ETZ IV c/8h en 3h de infusión',
@@ -1140,6 +1184,7 @@ export const ANTIBIOTIC_CATALOG: Record<string, AntibioticDef> = {
 
   omadacycline: {
     id: 'omadacycline', displayName: 'Omadaciclina 200mg IV (carga) → 100mg IV c/24h',
+    fullName: 'Omadaciclina',
     shortName: 'OMC', class: 'Aminometilciclina (tetraciclina nueva generación)',
     pkpdType: 'auc', peakConcentration: 2.5, halfLifeHours: 17, doseIntervalHours: 24,
     doseStandard: '200mg IV carga día 1, luego 100mg IV c/24h (VO: 300mg carga → 300mg c/24h)',
@@ -1157,6 +1202,7 @@ export const ANTIBIOTIC_CATALOG: Record<string, AntibioticDef> = {
 
   eravacycline: {
     id: 'eravacycline', displayName: 'Eravacicline 1mg/kg IV c/12h',
+    fullName: 'Eravaciclina',
     shortName: 'ERV', class: 'Fluorociclina (tetracicilina sintética)',
     pkpdType: 'auc', peakConcentration: 2.2, halfLifeHours: 20, doseIntervalHours: 12,
     doseStandard: '1mg/kg IV c/12h',
@@ -1174,6 +1220,7 @@ export const ANTIBIOTIC_CATALOG: Record<string, AntibioticDef> = {
 
   tedizolid: {
     id: 'tedizolid', displayName: 'Tedizolid 200mg IV/VO c/24h × 6 días',
+    fullName: 'Tedizolid',
     shortName: 'TDZ', class: 'Oxazolidinona 2G',
     pkpdType: 'auc', peakConcentration: 3.0, halfLifeHours: 12, doseIntervalHours: 24,
     doseStandard: '200mg IV o VO c/24h × 6 días (SSTI) / uso prolongado off-label',
@@ -1191,6 +1238,7 @@ export const ANTIBIOTIC_CATALOG: Record<string, AntibioticDef> = {
 
   flucytosine_5fc: {
     id: 'flucytosine_5fc', displayName: '5-Fluorocitosina 25mg/kg VO c/6h',
+    fullName: '5-Fluorocitosina',
     shortName: '5-FC', class: 'Antifúngico pirimidínico',
     pkpdType: 'time', peakConcentration: 70, halfLifeHours: 3, doseIntervalHours: 6,
     doseStandard: '25mg/kg VO c/6h (ajustar a CrCl — hepatotoxicidad y mielosupresión)',
@@ -1208,6 +1256,7 @@ export const ANTIBIOTIC_CATALOG: Record<string, AntibioticDef> = {
 
   isavuconazole: {
     id: 'isavuconazole', displayName: 'Isavuconazol 372mg IV c/8h × 6 dosis, luego c/24h',
+    fullName: 'Isavuconazol',
     shortName: 'ISA', class: 'Antifúngico triazólico 3G',
     pkpdType: 'auc', peakConcentration: 4.5, halfLifeHours: 130, doseIntervalHours: 24,
     doseStandard: '372mg IV c/8h × 6 dosis (carga), luego 372mg c/24h',
@@ -1225,6 +1274,7 @@ export const ANTIBIOTIC_CATALOG: Record<string, AntibioticDef> = {
 
   polymyxin_b: {
     id: 'polymyxin_b', displayName: 'Polimixina B 1.5-2.5mg/kg/día IV en 2 dosis',
+    fullName: 'Polimixina B',
     shortName: 'PMB', class: 'Polimixina B (directa, sin profármaco)',
     pkpdType: 'conc', peakConcentration: 5, halfLifeHours: 12, doseIntervalHours: 12,
     doseStandard: '1.25mg/kg IV c/12h (NO requiere ajuste en FRA — farmacocinética diferente a Colistina)',
@@ -1242,6 +1292,7 @@ export const ANTIBIOTIC_CATALOG: Record<string, AntibioticDef> = {
 
   azithromycin_iv: {
     id: 'azithromycin_iv', displayName: 'Azitromicina 500mg IV c/24h',
+    fullName: 'Azitromicina',
     shortName: 'AZI', class: 'Macrólido 15-membered (azálido)',
     pkpdType: 'auc', peakConcentration: 0.44, halfLifeHours: 68, doseIntervalHours: 24,
     doseStandard: '500mg IV c/24h (NAC: combinación con β-lactámico)',
@@ -1268,6 +1319,7 @@ export type DrugCategory = 'diuretic' | 'vasopressor' | 'sedative' | 'analgesic'
 export interface AdjunctDrugDef {
   id:                     string;
   displayName:            string;
+  fullName:               string;
   shortName:              string;
   category:               DrugCategory;
   halfLifeHours:          number;
@@ -1284,6 +1336,7 @@ export interface AdjunctDrugDef {
 export const ADJUNCT_DRUG_CATALOG: Record<string, AdjunctDrugDef> = {
   furosemide: {
     id: 'furosemide', displayName: 'Furosemida 40mg IV',
+    fullName: 'Furosemida',
     shortName: 'FURO', category: 'diuretic', halfLifeHours: 1.5,
     doseRange: { min: 20, max: 80, unit: 'mg' },
     rosePhase: 'E',
@@ -1420,6 +1473,7 @@ export interface SSCBundle {
 export interface VademecumEntry {
   id:           string;
   displayName:  string;
+  fullName:     string;
   shortName:    string;
   type:         'antibiotic' | 'adjunct';
   category:     string;
@@ -1435,6 +1489,7 @@ export function getVademecum(): VademecumEntry[] {
   const atbs: VademecumEntry[] = Object.values(ANTIBIOTIC_CATALOG).map((def) => ({
     id:          def.id,
     displayName: def.displayName,
+    fullName:    def.fullName,
     shortName:   def.shortName,
     type:        'antibiotic' as const,
     category:    def.class,
@@ -1454,6 +1509,7 @@ export function getVademecum(): VademecumEntry[] {
   const adjuncts: VademecumEntry[] = Object.values(ADJUNCT_DRUG_CATALOG).map((def) => ({
     id:          def.id,
     displayName: def.displayName,
+    fullName:    def.fullName,
     shortName:   def.shortName,
     type:        'adjunct' as const,
     category:    def.category,

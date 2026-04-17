@@ -175,7 +175,7 @@ function CultureResultCard({ result }: { result: CultureResult }) {
                     {sensitivityLabel(sens)}
                   </span>
                   <span className="text-[9px] text-gray-300 truncate max-w-[60px]">
-                    {atbDef?.shortName || atbId}
+                    {atbDef?.fullName || atbId}
                   </span>
                   {mic !== undefined && (
                     <span className="text-[8px] text-gray-500">({mic})</span>
@@ -504,6 +504,7 @@ const CulturePanel: React.FC = () => {
                   const qLower = vademecumFilter.toLowerCase();
                   const matchSearch = !qLower ||
                     atb.displayName.toLowerCase().includes(qLower) ||
+                    atb.fullName.toLowerCase().includes(qLower) ||
                     atb.shortName.toLowerCase().includes(qLower) ||
                     atb.class.toLowerCase().includes(qLower);
                   const matchClass = !selectedClass || atb.class === selectedClass;
@@ -513,7 +514,7 @@ const CulturePanel: React.FC = () => {
                   <div key={atb.id} className="bg-[#0a1525] rounded border border-white/5 p-2">
                     <div className="flex items-center justify-between mb-1">
                       <div>
-                        <span className="font-bold text-[10px] text-purple-300">{atb.shortName}</span>
+                        <span className="font-bold text-[10px] text-purple-300">{atb.fullName}</span>
                         <span className="text-[9px] text-gray-400 ml-1.5">{atb.class}</span>
                       </div>
                       <div className="flex gap-1">

@@ -6,7 +6,6 @@
 //   ΔP = Vt / Compliance                           [Amato NEJM 2015]
 //   Pplat = PEEP + ΔP
 //   MP = 0.098 × FR × Vt(L) × (Ppico − ΔP/2)     [Grieco Crit Care 2026]
-//   S/F = SpO2 / FiO2                              [Global ARDS Def. 2024]
 //
 // Umbrales:
 //   ΔP  : verde <14, amarillo 14-18, rojo >18 cmH2O
@@ -14,51 +13,61 @@
 //   Vt  : verde ≤420 mL (6 mL/kg × 70 kg), rojo >420
 //   S/F : verde >235, amarillo 148-235, rojo <148
 
-import React from 'react';
-import { usePatientStore }   from '../store/usePatientStore';
+import React, { useMemo } from 'react';
+import { useShallow } from 'zustand/react/shallow';
+import { usePatientStore } from '../store/usePatientStore';
 import { usePathologyStore } from '../store/usePathologyStore';
-
-const MONO            = "'JetBrains Mono', 'Courier New', monospace";
 const COMPLIANCE_BASE = 50.0; // mL/cmH2O pulmon sano
 
 function zoneColor(value: number, green: number, yellow: number, highIsBad: boolean): string {
   if (highIsBad) {
-    if (value <= green)  return '#34d399';
+    if (value <= green) return '#34d399';
     if (value <= yellow) return '#fbbf24';
     return '#ef4444';
   } else {
-    if (value >= green)  return '#34d399';
+    if (value >= green) return '#34d399';
     if (value >= yellow) return '#fbbf24';
     return '#ef4444';
   }
 }
 
-function berlinLabel(sf: number): { label: string; color: string } {
-  if (sf > 235) return { label: 'LEVE',     color: '#a3e635' };
-  if (sf > 148) return { label: 'MODERADO', color: '#fbbf24' };
-  return          { label: 'SEVERO',        color: '#ef4444' };
+interface ArdsClassification {
+  label: 'LEVE' | 'MODERADO' | 'SEVERO' | 'SIN SDRA';
+  color: string;
+}
+
+// Clasificación de severidad del SDRA según el Consenso de Berlín (usando P/F)
+// y la modificación de Kigali (usando S/F como sustituto).
+// Ref: ARDS Definition Task Force. JAMA 2012;311(20):2122-2122.
+// Ref: Brown SM, et al. Am J Respir Crit Care Med. 2016;193(12):1373-1380. (Kigali)
+function getARDSClassification(pfRatio: number, sfRatio: number): ArdsClassification {
+  // Usar P/F (Berlin) si está disponible, si no, usar S/F (Kigali)
+  if (pfRatio > 0) {
+    if (pfRatio > 300) return { label: 'SIN SDRA', color: '#34d399' };
+    if (pfRatio > 200) return { label: 'LEVE', color: '#a3e635' };
+    if (pfRatio > 100) return { label: 'MODERADO', color: '#fbbf24' };
+    return { label: 'SEVERO', color: '#ef4444' };
+  } else {
+    if (sfRatio > 315) return { label: 'SIN SDRA', color: '#34d399' };
+    if (sfRatio > 235) return { label: 'LEVE', color: '#a3e635' };
+    if (sfRatio > 148) return { label: 'MODERADO', color: '#fbbf24' };
+    return { label: 'SEVERO', color: '#ef4444' };
+  }
 }
 
 function MetricBox({ label, value, color, sublabel }: {
   label: string; value: string; color: string; sublabel?: string;
 }) {
   return (
-    <div style={{
-      background: 'rgba(0,0,0,0.35)',
-      border: `1px solid ${color}44`,
-      borderRadius: 6,
-      padding: '5px 10px',
-      minWidth: 88,
-      textAlign: 'center',
-    }}>
-      <div style={{ color: '#6b7a99', fontSize: '0.5rem', fontFamily: MONO, marginBottom: 2 }}>
+    <div className="bg-black/35 rounded-md px-2.5 py-1.5 min-w-[88px] text-center" style={{ border: `1px solid ${color}44` }}>
+      <div className="text-slate-500 text-[0.5rem] font-mono mb-0.5">
         {label}
       </div>
-      <div style={{ color, fontSize: '0.88rem', fontWeight: 700, fontFamily: MONO }}>
+      <div className="text-[0.88rem] font-bold font-mono" style={{ color }}>
         {value}
       </div>
       {sublabel && (
-        <div style={{ color, fontSize: '0.42rem', fontFamily: MONO, marginTop: 1, opacity: 0.8 }}>
+        <div className="text-[0.42rem] font-mono mt-0.5 opacity-80" style={{ color }}>
           {sublabel}
         </div>
       )}
@@ -67,71 +76,80 @@ function MetricBox({ label, value, color, sublabel }: {
 }
 
 export const ARDSStatusBar: React.FC = () => {
-  const vitals     = usePatientStore((s) => s.vitals);
-  const ventilator = usePatientStore((s) => s.ventilator);
-  const modifiers  = usePathologyStore((s) => s.modifiers);
-  const ards       = usePathologyStore((s) => s.ards);
+  const { vitals, ventilator } = usePatientStore(useShallow(s => ({
+    vitals: s.vitals,
+    ventilator: s.ventilator,
+  })));
+  const { modifiers, ards } = usePathologyStore(useShallow(s => ({
+    modifiers: s.modifiers,
+    ards: s.ards,
+  })));
 
   // Solo mostrar cuando hay lesion pulmonar clinicamente significativa
   const showBar = ards.isActive || modifiers.lungShuntFraction > 0.15;
   if (!showBar) return null;
 
-  // ─── Campos correctos del store ───────────────────────────────────────────
-  // ventilator.vt   → mL (ej: 500)
-  // ventilator.fio2 → decimal 0.21-1.0 (MonitorApp muestra Math.round(fio2*100))
-  // ventilator.peep → cmH2O
-  const vt      = ventilator.vt      ?? 500;
-  const peep    = ventilator.peep    ?? 5;
-  const fio2Dec = ventilator.fio2    ?? 0.40;   // ya es decimal
-  const spo2    = (vitals as any).spo2 ?? 97;
-  const fr      = (vitals as any).respiratoryRate ?? 14;
+  const derivedValues = useMemo(() => {
+    // SOLUCIÓN 3: Evitar `as any` repetido creando una variable con tipo explícito.
+    const respVitals = vitals as {
+      spo2?: number; respiratoryRate?: number; paO2?: number; pplat?: number; ppico?: number; deltaP?: number; mechanicalPower?: number;
+    };
 
-  // ─── Calculos fisiologicos ─────────────────────────────────────────────────
-  const compliance = COMPLIANCE_BASE * modifiers.complianceMultiplier;
+    const vt = ventilator.vt ?? 500;
+    const peep = ventilator.peep ?? 5;
+    const fio2Dec = ventilator.fio2 ?? 0.40;
+    const spo2 = respVitals.spo2 ?? 97;
+    const fr = respVitals.respiratoryRate ?? 14;
+    const pao2 = respVitals.paO2 ?? -1;
 
-  // ΔP = Vt / C  [Amato NEJM 2015 — mejor predictor mortalidad SDRA]
-  const deltaP = compliance > 0 ? vt / compliance : 0;
-  const pplat  = peep + deltaP;
+    // ─── Calculos fisiologicos ─────────────────────────────────────────────────
+    const compliance = COMPLIANCE_BASE * modifiers.complianceMultiplier;
 
-  // Ppico ≈ Pplat + resistencia normal intubado (~5 cmH2O)
-  const ppico  = pplat + 5;
+    // SOLUCIÓN 2: Usar valores del engine como fuente de verdad, con fallback.
+    const pplat = respVitals.pplat ?? (peep + (compliance > 0 ? vt / compliance : 0));
+    const deltaP = respVitals.deltaP ?? (pplat - peep);
+    const ppico = respVitals.ppico ?? (pplat + 5);
+    const mp = respVitals.mechanicalPower ?? (0.098 * fr * (vt / 1000) * (ppico - deltaP / 2));
 
-  // Potencia Mecanica [Grieco Critical Care 2026; Gattinoni ICM 2016]
-  // MP = 0.098 × FR × Vt(L) × [Ppico − ΔP/2]
-  const mp = 0.098 * fr * (vt / 1000) * (ppico - deltaP / 2);
+    const pfRatio = (fio2Dec > 0 && pao2 > 0) ? Math.round(pao2 / fio2Dec) : 0;
+    const sfRatio = (fio2Dec > 0) ? Math.round(spo2 / fio2Dec) : 0;
+    const vtPerKg = (vt / 70).toFixed(1);
+    const vtAlert = vt > 420;
 
-  // Ratio S/F [Global ARDS Definition 2024]
-  // S/F < 148 ≈ P/F < 100 (Berlin severo)
-  const sf = fio2Dec > 0 ? Math.round(spo2 / fio2Dec) : 0;
+    const deltaPColor = zoneColor(deltaP, 14, 18, true);
+    const mpColor = zoneColor(mp, 17, 25, true);
+    const vtColor = vtAlert ? '#ef4444' : '#34d399';
+    const { label: ardsLabel, color: ardsColor } = getARDSClassification(pfRatio, sfRatio);
 
-  // Vt protector: 6 mL/kg PBW para 70 kg = 420 mL [ARDS Network 2000]
-  const vtPerKg = (vt / 70).toFixed(1);
-  const vtAlert = vt > 420;
+    return {
+      vt, compliance, deltaP, pplat, mp, pfRatio, sfRatio, vtPerKg, vtAlert,
+      deltaPColor, mpColor, vtColor, ardsLabel, ardsColor,
+    };
+    // SOLUCIÓN 1: Dependencias granulares para optimizar re-cálculos y corregir bug
+    // (no se actualizaba al pronar/supinar).
+  }, [
+    ventilator.vt,
+    ventilator.peep,
+    ventilator.fio2,
+    vitals.spo2,
+    vitals.respiratoryRate,
+    vitals.paO2,
+    vitals.pplat,
+    vitals.ppico,
+    vitals.deltaP,
+    vitals.mechanicalPower,
+    modifiers.complianceMultiplier,
+    ards.proneActive,
+  ]);
 
-  const deltaPColor = zoneColor(deltaP, 14, 18, true);
-  const mpColor     = zoneColor(mp, 17, 25, true);
-  const vtColor     = vtAlert ? '#ef4444' : '#34d399';
-  const { label: sfLabel, color: sfColor } = berlinLabel(sf);
+  const { vt, compliance, deltaP, pplat, mp, pfRatio, sfRatio, vtPerKg, vtAlert, deltaPColor, mpColor, vtColor, ardsLabel, ardsColor } = derivedValues;
 
   return (
-    <div style={{
-      flexShrink: 0,
-      display: 'flex',
-      alignItems: 'center',
-      gap: 6,
-      padding: '5px 12px',
-      background: 'rgba(0,0,0,0.45)',
-      borderTop:    '1px solid rgba(56,189,248,0.12)',
-      borderBottom: '1px solid rgba(56,189,248,0.12)',
-      flexWrap: 'wrap',
-    }}>
+    <div className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 bg-black/45 border-y border-cyan-500/10 flex-wrap">
 
       {/* Etiqueta sección */}
-      <div style={{
-        color: '#38bdf8', fontSize: '0.48rem', fontWeight: 700,
-        fontFamily: MONO, letterSpacing: '0.1em', whiteSpace: 'nowrap',
-      }}>
-        SDRA
+      <div className="text-cyan-400 text-[0.48rem] font-bold font-mono tracking-[0.1em] whitespace-nowrap">
+        SDRA: BERLIN / KIGALI
       </div>
 
       {/* ΔP — Driving Pressure */}
@@ -166,12 +184,22 @@ export const ARDSStatusBar: React.FC = () => {
         sublabel={vtAlert ? `⚠ ${vt}mL > 420mL` : `${vt}mL OK`}
       />
 
-      {/* Ratio S/F */}
+      {/* Ratio P/F (Berlin) */}
+      {derivedValues.pfRatio > 0 && (
+        <MetricBox
+          label="Ratio P/F"
+          value={String(pfRatio)}
+          color={ardsColor}
+          sublabel={ardsLabel}
+        />
+      )}
+
+      {/* Ratio S/F (Kigali) */}
       <MetricBox
         label="Ratio S/F"
-        value={String(sf)}
-        color={sfColor}
-        sublabel={sfLabel}
+        value={String(sfRatio)}
+        color={ardsColor}
+        sublabel={pfRatio > 0 ? `(Kigali: ${ardsLabel})` : ardsLabel}
       />
 
       {/* Compliance */}
@@ -184,15 +212,11 @@ export const ARDSStatusBar: React.FC = () => {
 
       {/* Indicador PRONO */}
       {ards.proneActive && (
-        <div style={{
-          background: 'rgba(163,230,53,0.12)',
-          border: '1px solid rgba(163,230,53,0.4)',
-          borderRadius: 6, padding: '5px 10px', textAlign: 'center',
-        }}>
-          <div style={{ color: '#a3e635', fontSize: '0.58rem', fontWeight: 700, fontFamily: MONO }}>
+        <div className="bg-lime-500/10 border border-lime-500/40 rounded-md px-2.5 py-1.5 text-center">
+          <div className="text-lime-400 text-[0.58rem] font-bold font-mono">
             PRONO ✓
           </div>
-          <div style={{ color: '#a3e635', fontSize: '0.4rem', fontFamily: MONO, opacity: 0.7 }}>
+          <div className="text-lime-400 text-[0.4rem] font-mono opacity-70">
             ACTIVO
           </div>
         </div>
