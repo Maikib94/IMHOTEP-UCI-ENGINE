@@ -1,4 +1,11 @@
-import { usePatientStore } from '../store/usePatientStore';
+// src/core/AcidBaseEngine.ts
+//
+// REGLA DE ARQUITECTURA:
+//   Solo lee PDSystemicEffects.metabolicStress — nunca plasmaConcentrations.
+//   PRIS modelado en DrugPDProfile.metabolicStress (propofol, thiopental).
+//
+import { usePatientStore }      from '../store/usePatientStore';
+import { usePharmacologyStore } from '../store/usePharmacologyStore';
 
 const HH_PKA             = 6.1;
 const CO2_ALPHA          = 0.0307;
@@ -51,10 +58,21 @@ export class AcidBaseEngine {
     const upd   = store.updateVitals;
     const vol   = store.bloodVolume;
 
-    const mapDeficit  = Math.max(0, MAP_PERF_THR - v.meanArterialPressure);
-    const coDeficit   = Math.max(0, CO_PERF_THR  - v.cardiacOutput);
-    const lacTgt      = Math.min(LACTATE_MAX,
-      LACTATE_NORMAL + mapDeficit * LAC_MAP_COEFF + coDeficit * LAC_CO_COEFF
+    // ─── Lactato: hipoperfusión + PRIS farmacológico ─────────────────────────────
+    // PRIS (Propofol Infusion Syndrome): infusiones prolongadas >4mg/kg/h (Cp>1)
+    // causan desacoplamiento de la fosforilación oxidativa mitocondrial:
+    // lactato ↑, pH ↓, acidosis metabólica con AG↑.
+    // Ref: Corbett SM et al. — Propofol-related infusion syndrome
+    //      in intensive care patients. Pharmacotherapy 2008;28(8):983-8.
+    const { systemicEffects: pd } = usePharmacologyStore.getState();
+    // pd.metabolicStress: 0–1 (cuadrático en Cp, calculado en PharmacologyEngine)
+    // Amplifica el objetivo de lactato en hasta +4 mmol/L en PRIS pleno.
+    const lacPrisBump = pd.metabolicStress * 4.0;
+
+    const mapDeficit = Math.max(0, MAP_PERF_THR - v.meanArterialPressure);
+    const coDeficit  = Math.max(0, CO_PERF_THR  - v.cardiacOutput);
+    const lacTgt     = Math.min(LACTATE_MAX,
+      LACTATE_NORMAL + mapDeficit * LAC_MAP_COEFF + coDeficit * LAC_CO_COEFF + lacPrisBump
     );
     const newLactate  = Math.max(LACTATE_MIN, Math.min(LACTATE_MAX,
       v.lactate + (lacTgt - v.lactate) * K_LACTATE * dt

@@ -98,6 +98,7 @@ export interface Vitals {
   urineOutput:          number;
   gcs:                  number;
   pupilState:           PupilState;
+  icp:                  number;   // mmHg — PIC (Monroe-Kelly); normal 5-15 mmHg
   pH:                   number;
   hco3:                 number;
   lactate:              number;
@@ -106,6 +107,7 @@ export interface Vitals {
   deltaDelta:           number;
   weight:               number;
   temperature:          number;   // °C — 36.0-37.5 normal (SATI/Cárdenas)
+  creatinine:           number;   // mg/dL — creatinina sérica (normal 0.7-1.2)
 }
 
 export interface Ventilator {
@@ -156,6 +158,7 @@ const INITIAL_VITALS: Vitals = {
   urineOutput:          1.0,
   gcs:                  15,
   pupilState:           'reactive',
+  icp:                  12,       // mmHg — normal ICP en adulto (Rangel-Castillo, Neurosurg Clin 2008)
   pH:                   7.40,
   hco3:                 24.0,
   lactate:              1.0,
@@ -164,6 +167,7 @@ const INITIAL_VITALS: Vitals = {
   deltaDelta:           0,
   weight:               70,
   temperature:          37.0,
+  creatinine:           1.0,
 };
 
 const BV_NORMAL      = 5000;

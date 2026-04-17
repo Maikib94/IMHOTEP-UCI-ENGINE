@@ -1,4 +1,10 @@
-import { usePatientStore } from '../store/usePatientStore';
+// src/core/RespiratoryEngine.ts
+//
+// REGLA DE ARQUITECTURA:
+//   Solo lee PDSystemicEffects — nunca plasmaConcentrations.
+//   Drug-specific respiratory weights modelados en DrugPDProfile.respDepressionWeight.
+//
+import { usePatientStore }      from '../store/usePatientStore';
 import { usePharmacologyStore } from '../store/usePharmacologyStore';
 const PAO2_FACTOR        = 713.0;
 const RESP_QUOTIENT      = 0.8;
@@ -21,6 +27,11 @@ const FR_MAX             = 40;
 const PACO2_K            = 0.002;
 const SPO2_HYPOXIA_THR   = 92;
 const FR_HYPOXIA_COEFF   = 0.8;
+// Desaturación por hipoventilación/apnea (Benumof's Airway Management, 2ª Ed.)
+const SPO2_HYPOVENT_THR     = 8;    // FR < 8 rpm → inicio de desaturación progresiva
+const SPO2_APNEA_DESAT_RATE = 4.0;  // %/min desaturación en apnea completa a FiO2 ambiental
+const SPO2_DRUG_AMPLIFIER   = 3.0;  // amplificación por fármacos sedantes/opiáceos
+const SPO2_RECOVERY_RATE    = 3.0;  // %/min velocidad máxima de recuperación al restaurar ventilación
 // Acidosis: modelo sigmoidal (Guyton Cap.42 — respiración de Kussmaul)
 const PH_ACIDOSIS_MID    = 7.25;      // Centro sigmoide — transición 7.35→7.15
 const PH_ACIDOSIS_STEEP  = 25;        // Pendiente sigmoide
@@ -40,6 +51,13 @@ const FR_ALKALOSIS_COEFF = 20.0;
 const MAP_PENALTY_MID    = 62.0;
 const MAP_PENALTY_STEEP  = 0.12;
 const MAP_PENALTY_MAX    = 30.0;
+
+// Shunt adicional por hipoperfusión pulmonar (paro/bajo CO) — West, Resp. Physiology 10ª Ed.
+const PERFUSION_SHUNT_MAX  = 0.85;   // shunt total cuando CO = 0 (V/Q matching imposible)
+// Tasa metabólica de acumulación de CO₂ en apnea pura (Benumof's Airway Mgmt, 2ª Ed.)
+const CO2_APNEA_RISE_RATE  = 3.5;    // mmHg/min — fisiológico: 3–6 mmHg/min
+// Tasa máxima de caída de SpO₂ por tick: limita teleportación numérica
+const SPO2_MAX_DECLINE_RATE = 8.0;   // %/min — clínicamente ~2-8 %/min en apnea/bajo CO
 
 // Retorna v si es finito, fallback en caso contrario.
 // CRÍTICO: Math.max(x, NaN) === NaN en JS — sin esto NaN se propaga.
@@ -78,11 +96,11 @@ export class RespiratoryEngine {
     const vent  = store.ventilator;
     const upd   = store.updateVitals;
 
-    // Inyectar Estado Farmacodinámico (PK/PD) + Concentraciones Plasmáticas directas
-    const { systemicEffects: pd, plasmaConcentrations: cp } = usePharmacologyStore.getState();
-    // propofolCp: concentración plasmática normalizada (0-1) del Propofol
-    // Lectura directa para depresión respiratoria central dosis-dependiente
-    const propofolCp = cp.propofol || 0;
+    // Solo leer PDSystemicEffects — nunca cp[] aquí.
+    // pd.respDepressionIdx: pre-calculado en PharmacologyEngine como suma ponderada
+    //   de DrugPDProfile.respDepressionWeight de cada fármaco activo.
+    const { systemicEffects: pd } = usePharmacologyStore.getState();
+    const drugRespDepressionIdx   = pd.respDepressionIdx; // 0–1
 
     // ─── Guards de entrada: ningún NaN puede entrar al pipeline ──────────
     // Si vent.vt = undefined → vaActual = NaN → paCO2 = NaN → Hill(NaN) = NaN
@@ -142,30 +160,57 @@ export class RespiratoryEngine {
     const spontOutput = Math.max(FR_MIN * muscleCapability, Math.min(FR_MAX, Math.round(frSmoothed)));
     const frSpontaneous = Math.round(spontOutput * muscleCapability);
 
-    const frActual = Math.max(setRR, frSpontaneous);
-
-    // ─── Depresión respiratoria directa por Propofol ─────────────────────
-    // Propofol deprime los neuronas respiratorias del bulbo raquídeo (GABA-A)
-    // de forma dosis-dependiente e independiente del drive reflejo (Kussmaul, hipoxia).
-    // Esta penalización es visible incluso en pacientes ventilados (↓ FR efectiva).
+    // ─── Penalización directa de FR por depresión respiratoria central ───────
+    // drugRespDepressionIdx ya encapsula la contribución ponderada de cada fármaco
+    // (propofol, opioides, dex, barbitúricos) sobre el centro bulbar respiratorio.
+    // Hasta −8 rpm a depresión máxima (idx = 1.0), adicional al centralDriveFactor.
     // Ref: Morgan & Mikhail — Clinical Anesthesiology, 5ª Ed., Cap. 8
-    const propofolFrPenalty = Math.round(propofolCp * 6); // hasta −6 rpm a 4 mg/kg/h
-    const frFinal = Math.max(FR_MIN, frActual - propofolFrPenalty);
+    const drugFrPenalty = Math.round(drugRespDepressionIdx * 8);
+
+    // FR espontánea visible en el monitor:
+    // → centralDriveFactor: reduce el drive reflejo (hipoxia, acidosis, etc.)
+    // → muscleCapability: BNM elimina capacidad muscular respiratoria
+    // → drugFrPenalty: depresión bulbar directa (propofol, opioides, barbitúricos)
+    const frSpontaneousFinal = Math.max(0, frSpontaneous - drugFrPenalty);
+
+    // FR efectiva para el intercambio gaseoso:
+    // El ventilador provee el backup mínimo (setRR), garantizando ventilación alveolar
+    // incluso cuando el paciente está paralizado o profundamente sedado.
+    const frEffective = Math.max(setRR, frSpontaneousFinal);
 
     // ─── 2. Mecánica ventilatoria ─────────────────────────────────────────
     const pplat = peep + vt / this.compliance;
     const ppico = pplat + FLOW_INSP * this.resistance;
 
     // ─── 3. PaCO2 ────────────────────────────────────────────────────────
-    // Usar frFinal (con efecto Propofol) para el cálculo de ventilación alveolar
-    const vaActual = Math.max(1, (vt - VD_ML) * frFinal);
-    const paCO2Tgt = PACO2_NORMAL * (VA_BASAL / vaActual);
-    const rawPaCO2 = vPaCO2 + (paCO2Tgt - vPaCO2) * PACO2_K * dt;
-    const paCO2    = Math.max(15, Math.min(120, safe(rawPaCO2, 40)));
+    // Apnea pura (frEffective = 0):
+    //   La ecuación alveolar se vuelve degenerada (VA = 0 → PaCO₂Tgt → ∞).
+    //   Usar modelo de acumulación metabólica directa: ~3.5 mmHg/min (fisiológico).
+    //   Ref: Benumof & Hagberg — Airway Management Principles and Practice, 2ª Ed.
+    // Con ventilación activa (frEffective > 0):
+    //   Ecuación alveolar estándar con tau de suavizado (Guyton Cap.41).
+    const vaActual = (vt - VD_ML) * frEffective; // ventilación alveolar real (0 en apnea)
+    let rawPaCO2: number;
+    if (vaActual <= 0) {
+      // Apnea: CO₂ sube a tasa metabólica pura — evita singularidad numérica
+      rawPaCO2 = vPaCO2 + (CO2_APNEA_RISE_RATE / 60) * dt;
+    } else {
+      // Ventilado: ecuación alveolar con target clampado para evitar overflow
+      const paCO2Tgt = Math.min(200, PACO2_NORMAL * (VA_BASAL / vaActual));
+      rawPaCO2 = vPaCO2 + (paCO2Tgt - vPaCO2) * PACO2_K * dt;
+    }
+    const paCO2 = Math.max(15, Math.min(120, safe(rawPaCO2, 40)));
 
     // ─── 4. PaO2 ─────────────────────────────────────────────────────────
+    // Shunt efectivo = shunt anatómico + shunt funcional por hipoperfusión pulmonar.
+    // En paro cardíaco (CO = 0): sin flujo sanguíneo pulmonar, el matching V/Q
+    // colapsa — la ventilación no puede oxigenar sangre que no pasa por los pulmones.
+    // Ref: West JB — Respiratory Physiology, 10ª Ed., Cap.5 (V/Q relationships)
+    const coFrac        = Math.min(1, Math.max(0, vCO / CO_NORMAL));
+    const perfusionShunt = (1 - coFrac) * PERFUSION_SHUNT_MAX; // 0 normal → 0.85 en paro
+    const effectiveShunt = Math.min(0.95, this.shunt + perfusionShunt);
     const pAO2Ideal = fio2 * PAO2_FACTOR - paCO2 / RESP_QUOTIENT;
-    const rawPaO2   = pAO2Ideal * (1 - this.shunt) + PVO2_MIXED * this.shunt;
+    const rawPaO2   = pAO2Ideal * (1 - effectiveShunt) + PVO2_MIXED * effectiveShunt;
     const paO2      = Math.max(20, Math.min(600, safe(rawPaO2, 97)));
 
     // ─── 5. SpO2: Hill — triple guard anti-NaN ────────────────────────────
@@ -190,18 +235,70 @@ export class RespiratoryEngine {
         (1 + Math.exp(MAP_PENALTY_STEEP * (vMAP - MAP_PENALTY_MID)));
       if (isFinite(mapPen)) spO2 -= mapPen;
     }
+
+    // ─── SpO2: Desaturación por Hipoventilación / Apnea ──────────────────
+    // Modela el agotamiento de reservas de O₂ alveolares durante ventilación
+    // inadecuada, más rápido que la vía PaCO₂ → PaO₂ → Hill.
+    //
+    // La reserva de O₂ (paO₂ actual) amortigua la velocidad de desaturación:
+    //   • FiO₂ alta → paO₂ elevado → desaturación lenta (preoxygenación)
+    //   • FiO₂ ambiental + apnea → desaturación rápida (~2-3 min crítico)
+    //
+    // Ref: Benumof & Hagberg — Airway Management Principles and Practice, 2ª Ed.
+    //      Mort TC, Curr Opin Anesthesiol 2004 — apneic desaturation rates
+    if (frEffective < SPO2_HYPOVENT_THR) {
+      // Severidad 0–1: apnea = 1.0, FR = 7 rpm = 0.125, FR = 4 rpm = 0.5
+      const hypoSeverity = (SPO2_HYPOVENT_THR - frEffective) / SPO2_HYPOVENT_THR;
+      // Reserva de O₂ basada en paO₂ actual: alta reserva → desaturación más lenta
+      const o2Reserve    = Math.max(0, Math.min(1, (paO2 - 60) / 300));
+      // Amplificación por fármacos: opiáceos/sedantes aumentan la tasa de desaturación
+      const drugAmplify  = 1.0 + drugRespDepressionIdx * SPO2_DRUG_AMPLIFIER;
+      // Tasa de desaturación por minuto, escalada por reserva O₂ disponible
+      const desatPerMin  = SPO2_APNEA_DESAT_RATE * hypoSeverity * drugAmplify * (1 - o2Reserve * 0.80);
+      const desatPenalty = desatPerMin * (dt / 60);
+      // Solo puede BAJAR la SpO₂ respecto al ciclo previo (no sube por esta vía)
+      spO2 = Math.min(spO2, vSpo2 - desatPenalty);
+    } else {
+      // Ventilación adecuada: SpO₂ recupera con velocidad rate-limited
+      // (evita saltos instantáneos de vuelta a 98% tras reanudar ventilación)
+      const recoveryPerMin = SPO2_RECOVERY_RATE * (1.0 + (fio2 - 0.21));
+      spO2 = Math.min(spO2, vSpo2 + recoveryPerMin * (dt / 60));
+    }
+
+    // Rate-limit SpO₂ decline: evita caída instantánea en un solo tick.
+    // SpO₂ no puede bajar más de SPO2_MAX_DECLINE_RATE por minuto.
+    // Permite que la hipoxemia sea gradual y clínicamente realista.
+    const maxDropThisTick = SPO2_MAX_DECLINE_RATE * (dt / 60);
+    spO2 = Math.max(spO2, vSpo2 - maxDropThisTick);
+
     spO2 = Math.max(50, Math.min(100, safe(spO2, 97)));
 
     // ─── 6. EtCO2 ────────────────────────────────────────────────────────
-    const coRatio      = vCO / CO_NORMAL;
-    const peepVdEffect = Math.max(0, (peep - 5) * 0.005);
-    const alvVdFrac    = 0.05 + Math.max(0, (1 - coRatio)) * 0.30 + peepVdEffect;
-    const etco2        = Math.max(5, Math.min(80,
-      safe(paCO2 * (1 - Math.min(0.85, alvVdFrac)), 38)
-    ));
+    // ETCO₂ depende de DOS factores independientes:
+    //   a) Ventilación alveolar — flujo de gas exhalado (ya modelado via frEffective)
+    //   b) Aporte de CO₂ al alvéolo — requiere flujo sanguíneo pulmonar (débito cardíaco)
+    //
+    // Paro cardíaco (CO = 0): sin transporte de CO₂ a los pulmones → ETCO₂ → 0-5 mmHg.
+    //   Este es el mecanismo fisiológico del "ETCO₂ como indicador de ROSC":
+    //   cuando el corazón reinicia, el ETCO₂ sube bruscamente (CO₂ acumulado en tejidos).
+    // Ref: Levine RL et al. — ETCO₂ as guide to CPR quality. Prehosp Emerg Care 1997.
+    //      ACLS Guidelines 2020 — ETCO₂ < 10 mmHg = CPR inefectivo.
+    let etco2: number;
+    if (frEffective === 0) {
+      // Apnea total: sin flujo exhalado, el capnógrafo no detecta CO₂
+      etco2 = 0;
+    } else {
+      const peepVdEffect   = Math.max(0, (peep - 5) * 0.005);
+      const alvVdFrac      = 0.05 + Math.max(0, (1 - coFrac)) * 0.30 + peepVdEffect;
+      const etco2Base      = paCO2 * (1 - Math.min(0.85, alvVdFrac));
+      // Factor de entrega de CO₂: proporcional a √CO (caída abrupta en bajo gasto/paro)
+      // CO=5→factor=1.0 | CO=1→0.45 | CO=0→0 (paro = ETCO₂ → 0 mmHg)
+      const co2DeliveryFactor = Math.sqrt(coFrac);
+      etco2 = Math.max(0, Math.min(80, safe(etco2Base * co2DeliveryFactor, 38)));
+    }
 
     upd({
-      respiratoryRate: frFinal,
+      respiratoryRate: frSpontaneousFinal,
       paCO2:           parseFloat(paCO2.toFixed(1)),
       paO2:            parseFloat(paO2.toFixed(1)),
       spo2:            Math.round(spO2),
