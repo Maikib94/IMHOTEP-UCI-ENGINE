@@ -34,7 +34,7 @@ const CH = [
 // Taquicardia > 130 bpm → ST comprimido, T-wave reducida
 function waveECG(ph: number, hr: number): number {
   const tAmp = hr < 55 ? 0.21 : hr > 130 ? 0.13 : 0.18;  // T-wave amplitude varía
-  const stBase = hr > 130 ? 0.48 : 0.50;                     // ST basline leve shift
+  const stBase = hr > 130 ? 0.48 : 0.50;                 // ST basline leve shift
   if (ph >= 0.06 && ph < 0.13) return 0.5 + 0.10 * Math.sin((ph - 0.06) / 0.07 * Math.PI);
   if (ph >= 0.19 && ph < 0.215) return 0.5 - 0.14 * ((ph - 0.19) / 0.025);
   if (ph >= 0.215 && ph < 0.235) return 0.36 + ((ph - 0.215) / 0.020) * 0.59;
@@ -51,7 +51,6 @@ function waveECG(ph: number, hr: number): number {
 function waveART(ph: number, sbp: number, dbp: number): number {
   const safeSbp = isFinite(sbp) && sbp > 20 ? sbp : 120;
   const safeDbp = isFinite(dbp) && dbp > 0 ? dbp : 80;
-
   // Auto-escala dinámica para la curva ART
   const displayMax = safeSbp <= 140 ? 150 : (safeSbp <= 190 ? 200 : 300);
 
@@ -105,7 +104,6 @@ function wavePLETH(ph: number, v: VS): number {
 
   const finalAmp = baseAmp * perfusionModifier;
   const a = Math.max(0.01, Math.min(1.5, finalAmp));
-
   let waveValue = 0.12 + Math.pow(Math.max(0, Math.sin(ph * Math.PI)), 2) * 0.76 * a;
 
   // BUG 1, FIX 2: Vincular forma de onda a desaturación
@@ -130,7 +128,7 @@ function waveETCO2(ph: number, etco2: number): number {
   if (amplitude < 0.01) return baseline; // apnea → línea plana
   if (ph < 0.05) return baseline;
   if (ph < 0.12) return baseline + ((ph - 0.05) / 0.07) * (plateauTop - baseline); // subida exp
-  if (ph < 0.58) return plateauTop;   // fase alveolar (plateau)
+  if (ph < 0.58) return plateauTop; // fase alveolar (plateau)
   if (ph < 0.63) return plateauTop + 0.03 * Math.sin(((ph - 0.58) / 0.05) * Math.PI); // alpha angle
   if (ph < 0.72) return plateauTop - ((ph - 0.63) / 0.09) * (plateauTop - baseline); // caída insp
   return baseline;
@@ -143,22 +141,6 @@ function waveRESP(ph: number, fr: number): number {
 }
 
 // ─── PIC (Monroe-Kelly) — Onda de PIC 3 picos ────────────────────────────────
-//
-// MORFOLOGÍA CLÍNICA de la onda de PIC (Kirkness CJ et al., Heart Lung 2000):
-//   P1 (Percusión): pulsación arterial directa (carótida → plexos coroideos)
-//   P2 (Tidal):     refleja compliance intracraneal (↑ cuando compliancia ↓)
-//   P3 (Dicrótica): cierre de válvula aórtica (dicrotic notch vascular)
-//
-// CAMBIO DIAGNÓSTICO (Lundberg / Monroe-Kelly):
-//   PIC normal (≤15 mmHg):  P1 > P2 > P3 (amortiguación normal de LCR)
-//   PIC elevada (15-25 mmHg): P2 → P1 (pérdida amortiguación LCR)
-//   PIC crítica (>25 mmHg): P2 > P1 (onda "redondeada", compliance abolida)
-//   PIC muy alta (>35 mmHg): onda casi monofásica (herniación inminente)
-//
-// Ref: Kirkness CJ et al. Intracranial pressure waveform analysis. Heart Lung 2000.
-//      Robba C et al. Noninvasive ICP estimation. Neurocrit Care 2020.
-//      Marmarou A et al. Intracranial pressure: Monroe-Kelly doctrine. J Neurosurg 1978.
-//
 function waveICP(ph: number, icp: number): number {
   const safeIcp = isFinite(icp) && icp >= 0 ? icp : 12;
 
@@ -171,7 +153,6 @@ function waveICP(ph: number, icp: number): number {
   const pulseP1 = Math.max(0.08, Math.min(0.45, (basePulse / displayMax) * 2.0));
 
   // P2/P1 ratio: indicador de compliance (Monroe-Kelly)
-  // Normal PIC=12: P2/P1 ≈ 0.55; PIC=20: ≈1.0 (P2=P1); PIC=30: ≈1.35 (P2>P1)
   const p2p1Ratio = Math.min(1.5, Math.max(0.40, safeIcp / 18));
   const pulseP2 = pulseP1 * p2p1Ratio;
   const pulseP3 = pulseP1 * 0.30; // dicrótica siempre más pequeña
@@ -185,14 +166,13 @@ function waveICP(ph: number, icp: number): number {
   if (ph < 0.22) {
     const t = (ph - 0.05) / 0.17;
     const p1 = pulseP1 * Math.sin(Math.min(t, 1) * Math.PI);
-    // En PIC crítica: P1 y P2 se fusionan (onda única)
     return baseline + p1 * (1 - monophasicBlend * 0.5);
   }
 
   // Nadir P1–P2
   if (ph < 0.27) return baseline + pulseP1 * 0.12;
 
-  // P2: onda tidal (0.27–0.47) — el DIAGNÓSTICO clave de Monroe-Kelly
+  // P2: onda tidal (0.27–0.47)
   if (ph < 0.49) {
     const t = (ph - 0.27) / 0.22;
     return baseline + pulseP2 * Math.sin(Math.min(t, 1) * Math.PI);
@@ -214,12 +194,10 @@ function waveICP(ph: number, icp: number): number {
 
 // ─── Dispatcher ───────────────────────────────────────────────────────────────
 type VS = ReturnType<typeof usePatientStore.getState>['vitals'];
-
 function getAmp(ch: number, phase: number, v: VS): number {
   switch (ch) {
     case 0: return waveECG(phase, isFinite(v.heartRate) ? v.heartRate : 75);
-    case 1: return waveART(phase, isFinite(v.systolicBP) ? v.systolicBP : 120,
-      isFinite(v.diastolicBP) ? v.diastolicBP : 80);
+    case 1: return waveART(phase, isFinite(v.systolicBP) ? v.systolicBP : 120, isFinite(v.diastolicBP) ? v.diastolicBP : 80);
     case 2: return wavePLETH(phase, v);
     case 3: return waveETCO2(phase, isFinite(v.etco2) ? v.etco2 : 38);
     case 4: return waveRESP(phase, isFinite(v.respiratoryRate) ? v.respiratoryRate : 14);
@@ -240,16 +218,20 @@ function buildGrid(W: number): HTMLCanvasElement {
   gc.height = CANVAS_H;
   const ctx = gc.getContext('2d');
   if (!ctx) return gc;
+
   ctx.fillStyle = BG_COLOR;
   ctx.fillRect(0, 0, W, CANVAS_H);
   ctx.strokeStyle = GRID_SMALL; ctx.lineWidth = 0.5;
   for (let x = LABEL_W; x <= W; x += 4) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, CANVAS_H); ctx.stroke(); }
   for (let y = 0; y <= CANVAS_H; y += 4) { ctx.beginPath(); ctx.moveTo(LABEL_W, y); ctx.lineTo(W, y); ctx.stroke(); }
+
   ctx.strokeStyle = GRID_LARGE; ctx.lineWidth = 1;
   for (let x = LABEL_W; x <= W; x += 20) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, CANVAS_H); ctx.stroke(); }
   for (let y = 0; y <= CANVAS_H; y += 20) { ctx.beginPath(); ctx.moveTo(LABEL_W, y); ctx.lineTo(W, y); ctx.stroke(); }
+
   ctx.strokeStyle = SEP_COLOR; ctx.lineWidth = 1;
   for (let i = 1; i < NUM_CH; i++) { ctx.beginPath(); ctx.moveTo(0, i * CH_H); ctx.lineTo(W, i * CH_H); ctx.stroke(); }
+
   ctx.beginPath(); ctx.moveTo(LABEL_W, 0); ctx.lineTo(LABEL_W, CANVAS_H); ctx.stroke();
   return gc;
 }
@@ -263,31 +245,18 @@ function getSensorState(pi: number, map: number): SensorState {
   return 'normal';
 }
 
-// Helper para determinar el estado y color de la alarma de un signo vital
 const getVitalStatus = (
   value: number,
   normalColor: string,
-  thresholds: {
-    crit_low?: number;
-    warn_low?: number;
-    warn_high?: number;
-    crit_high?: number;
-  }
+  thresholds: { crit_low?: number; warn_low?: number; warn_high?: number; crit_high?: number; }
 ): { color: string; level: 'none' | 'warning' | 'critical' } => {
-  if (value < 0) return { color: normalColor, level: 'none' }; // Ignorar valores inválidos
+  if (value < 0) return { color: normalColor, level: 'none' };
 
-  if (thresholds.crit_low !== undefined && value < thresholds.crit_low) {
-    return { color: '#ef4444', level: 'critical' }; // Rojo crítico
-  }
-  if (thresholds.crit_high !== undefined && value > thresholds.crit_high) {
-    return { color: '#ef4444', level: 'critical' }; // Rojo crítico
-  }
-  if (thresholds.warn_low !== undefined && value < thresholds.warn_low) {
-    return { color: '#f97316', level: 'warning' }; // Naranja advertencia
-  }
-  if (thresholds.warn_high !== undefined && value > thresholds.warn_high) {
-    return { color: '#f97316', level: 'warning' }; // Naranja advertencia
-  }
+  if (thresholds.crit_low !== undefined && value < thresholds.crit_low) return { color: '#ef4444', level: 'critical' };
+  if (thresholds.crit_high !== undefined && value > thresholds.crit_high) return { color: '#ef4444', level: 'critical' };
+  if (thresholds.warn_low !== undefined && value < thresholds.warn_low) return { color: '#f97316', level: 'warning' };
+  if (thresholds.warn_high !== undefined && value > thresholds.warn_high) return { color: '#f97316', level: 'warning' };
+
   return { color: normalColor, level: 'none' };
 };
 
@@ -301,7 +270,7 @@ function computeVenousArtifact(pi: number, map: number, nowMs: number): number {
   return baseDrop + slowSin + fastSin;
 }
 
-// ─── drawLabels — Panel izquierdo con valores numéricos por canal ─────────────
+// ─── drawLabels ───────────────────────────────────────────────────────────────
 function drawLabels(
   ctx: CanvasRenderingContext2D,
   W: number, v: VS,
@@ -309,7 +278,6 @@ function drawLabels(
   audioWarningRef: React.RefObject<HTMLAudioElement>,
   stRef: React.MutableRefObject<{ alarmLevel: 'none' | 'warning' | 'critical';[key: string]: any; }>
 ): void {
-  // --- Obtener y validar todos los valores de signos vitales ---
   const hr = isFinite(v.heartRate) ? Math.round(v.heartRate) : -1;
   const sbp = isFinite(v.systolicBP) ? Math.round(v.systolicBP) : -1;
   const dbp = isFinite(v.diastolicBP) ? Math.round(v.diastolicBP) : -1;
@@ -321,15 +289,14 @@ function drawLabels(
   const pi = typeof v.plethAmplitude === 'number' && isFinite(v.plethAmplitude) ? v.plethAmplitude : 1.0;
   const cpp = (map !== -1 && icp !== -1) ? Math.round(map - icp) : -1;
 
-  // --- Lógica de parpadeo y estado del sensor ---
   const sensor = getSensorState(pi, map);
   const nowMs = performance.now();
-  const blink = Math.floor(nowMs / 600) % 2 === 0; // Parpadeo para valores críticos
+  const blink = Math.floor(nowMs / 600) % 2 === 0;
 
-  // --- Lógica de visualización de SpO2 (dependiente del sensor) ---
   let spo2Display: string;
   let spo2Unit: string;
   let spo2SensorColor: string;
+
   if (sensor === 'fail') {
     spo2Display = blink ? '---' : '   ';
     spo2Unit = 'SIN SENAL';
@@ -339,23 +306,21 @@ function drawLabels(
     const spo2Artifact = Math.round(Math.max(70, Math.min(99, spo2Real - artifact)));
     spo2Display = '~' + spo2Artifact;
     spo2Unit = 'ARTEFACTO';
-    spo2SensorColor = '#fbbf24'; // Naranja-ámbar para artefacto
+    spo2SensorColor = '#fbbf24';
   } else {
     spo2Display = spo2Real !== -1 ? String(spo2Real) : '--';
     spo2Unit = '%';
     spo2SensorColor = CH[2].color;
   }
 
-  // --- Lógica de alarmas y colores para cada signo vital ---
   const hrStatus = getVitalStatus(hr, CH[0].color, { crit_low: 40, warn_low: 55, warn_high: 120, crit_high: 140 });
   const artStatus = getVitalStatus(map, CH[1].color, { crit_low: 65, warn_high: 110, crit_high: 130 });
   const spo2Status = getVitalStatus(spo2Real, spo2SensorColor, { crit_low: 88, warn_low: 92 });
   const etco2Status = getVitalStatus(etco2, CH[3].color, { crit_low: 25, warn_low: 35, warn_high: 50, crit_high: 65 });
   const rrStatus = getVitalStatus(rr, CH[4].color, { crit_low: 8, warn_low: 12, warn_high: 28, crit_high: 35 });
   const icpStatus = getVitalStatus(icp, CH[5].color, { warn_high: 20, crit_high: 30 });
-  const cppColor = cpp < 50 ? '#ef4444' : cpp < 60 ? '#f97316' : '#a3e635'; // Color específico para el texto de CPP
+  const cppColor = cpp < 50 ? '#ef4444' : cpp < 60 ? '#f97316' : '#a3e635';
 
-  // El estado del sensor tiene prioridad sobre el valor numérico para el color de SpO2 y su nivel de alarma
   if (sensor !== 'normal') {
     spo2Status.color = spo2SensorColor;
   }
@@ -370,7 +335,7 @@ function drawLabels(
   ];
   const units = [
     CH[0].unit,
-    map !== -1 ? `(${Math.round(map)})` : '', // Mostrar PAM en la línea de unidad de ART
+    map !== -1 ? `(${Math.round(map)})` : '',
     spo2Unit,
     CH[3].unit,
     CH[4].unit,
@@ -379,9 +344,8 @@ function drawLabels(
   const colors = [hrStatus.color, artStatus.color, spo2Status.color, etco2Status.color, rrStatus.color, icpStatus.color];
   const statuses = [hrStatus, artStatus, spo2Status, etco2Status, rrStatus, icpStatus];
   const blinks = statuses.map(s => s.level === 'critical');
-  blinks[2] = blinks[2] || sensor === 'fail'; // SpO2 parpadea también si falla el sensor
+  blinks[2] = blinks[2] || sensor === 'fail';
 
-  // --- Lógica de Alarma Sonora ---
   let highestAlarmLevel: 'none' | 'warning' | 'critical' = 'none';
   if (blinks.some(b => b)) {
     highestAlarmLevel = 'critical';
@@ -391,13 +355,10 @@ function drawLabels(
 
   const audioCriticalEl = audioCriticalRef.current;
   const audioWarningEl = audioWarningRef.current;
-
   if (highestAlarmLevel !== stRef.current.alarmLevel) {
-    // Detener todos los sonidos primero
     if (audioCriticalEl) { audioCriticalEl.pause(); audioCriticalEl.currentTime = 0; }
     if (audioWarningEl) { audioWarningEl.pause(); audioWarningEl.currentTime = 0; }
 
-    // Iniciar el sonido correcto
     if (highestAlarmLevel === 'critical' && audioCriticalEl) {
       audioCriticalEl.play().catch(e => console.warn("Error al reproducir sonido de alarma crítica:", e));
     } else if (highestAlarmLevel === 'warning' && audioWarningEl) {
@@ -405,38 +366,31 @@ function drawLabels(
     }
     stRef.current.alarmLevel = highestAlarmLevel;
   }
-  // --- Fin Lógica de Alarma ---
 
   for (let i = 0; i < NUM_CH; i++) {
     const top = i * CH_H;
     ctx.fillStyle = BG_COLOR;
     ctx.fillRect(0, top, LABEL_W - 1, CH_H);
 
-    // El color de la etiqueta y el valor base es el color de la alarma
     let valueColor = colors[i];
-    // Si es crítico, el valor parpadea alternando con el color de fondo
     if (blinks[i] && blink) {
       valueColor = BG_COLOR;
     }
 
-    // Dibujar Etiqueta (siempre con el color de la alarma, sin parpadeo)
     ctx.fillStyle = colors[i];
     ctx.font = 'bold 10px "JetBrains Mono", monospace';
     ctx.fillText(CH[i].label, 4, top + 15);
 
-    // Dibujar Valor (puede parpadear)
     ctx.fillStyle = valueColor;
     const isLong = vals[i].length > 4;
     ctx.font = `bold ${isLong ? '11px' : '13px'} "JetBrains Mono", monospace`;
     ctx.fillText(vals[i], 2, top + 37);
 
-    // Segunda línea: unidad / suplemento
-    if (i === 1) { // Canal ART
+    if (i === 1) {
       ctx.fillStyle = '#446688';
       ctx.font = '9px "JetBrains Mono", monospace';
       ctx.fillText(units[i], 2, top + 51);
     } else if (i === 2) {
-      // SpO2: unit + PI
       ctx.fillStyle = sensor !== 'normal' ? spo2SensorColor : '#446688';
       ctx.font = `bold ${sensor !== 'normal' ? '7px' : '9px'} "JetBrains Mono", monospace`;
       ctx.fillText(units[i], 2, top + 51);
@@ -444,11 +398,9 @@ function drawLabels(
       ctx.font = '8px "JetBrains Mono", monospace';
       ctx.fillText('PI:' + (isFinite(pi) ? pi.toFixed(2) : '--'), 2, top + 63);
     } else if (i === 5) {
-      // PIC: CPP en color segun criticalidad
       ctx.fillStyle = cppColor;
       ctx.font = 'bold 8px "JetBrains Mono", monospace';
       ctx.fillText(units[i], 2, top + 51);
-      // Indicar P2>P1 si PIC > 20 (Monroe-Kelly pathological)
       if (icp > 20 && icp !== -1) {
         ctx.fillStyle = icpStatus.color;
         ctx.font = '7px "JetBrains Mono", monospace';
@@ -461,7 +413,8 @@ function drawLabels(
     }
   }
 
-  ctx.strokeStyle = SEP_COLOR; ctx.lineWidth = 1;
+  ctx.strokeStyle = SEP_COLOR;
+  ctx.lineWidth = 1;
   ctx.beginPath();
   ctx.moveTo(LABEL_W, 0); ctx.lineTo(LABEL_W, CANVAS_H);
   ctx.stroke();
@@ -481,7 +434,7 @@ const WaveformMonitor: React.FC<Props> = ({ width: widthProp }) => {
   const stRef = useRef({
     writeX: 0,
     lastTime: 0,
-    phases: [0, 0, 0, 0, 0, 0] as number[],  // 6 canales
+    phases: [0, 0, 0, 0, 0, 0] as number[],
     alarmLevel: 'none' as 'none' | 'warning' | 'critical',
     prevY: new Array(NUM_CH).fill(null) as (number | null)[],
     labelTimer: 0,
@@ -533,15 +486,16 @@ const WaveformMonitor: React.FC<Props> = ({ width: widthProp }) => {
         const { vitals } = usePatientStore.getState();
         const hrHz = Math.max(0.2, (isFinite(vitals.heartRate) ? vitals.heartRate : 75) / 60);
         const rrHz = Math.max(0.1, (isFinite(vitals.respiratoryRate) ? vitals.respiratoryRate : 14) / 60);
-        // [ECG, ART, PLETH, EtCO2, RESP, PIC]
-        // PIC pulsa con el corazón (igual que ECG y ART)
         const freqs = [hrHz, hrHz, hrHz, rrHz, rrHz, hrHz];
         const pxStep = Math.max(1, Math.round(SCAN_PX_S * dt));
 
         for (let px = 0; px < pxStep; px++) {
           const xIdx = Math.floor(st.writeX + px) % drawW;
           const canvasX = LABEL_W + xIdx;
-          if (xIdx === 0) { st.prevY = new Array(NUM_CH).fill(null); }
+
+          if (xIdx === 0) {
+            st.prevY = new Array(NUM_CH).fill(null);
+          }
 
           const eraseX = LABEL_W + (xIdx + ERASE_W) % drawW;
           const slice = Math.min(ERASE_W, W - eraseX);
@@ -555,20 +509,21 @@ const WaveformMonitor: React.FC<Props> = ({ width: widthProp }) => {
             if (!isFinite(amp)) amp = 0.5;
             const curY = ampToY(ch, amp);
             ctx.fillStyle = CH[ch].color;
-            if (st.prevY[ch] !== null) {
+
+            // FIX: Condición robusta para evitar el efecto telaraña al hacer wrap-around
+            if (st.prevY[ch] !== null && canvasX > LABEL_W + pxStep) {
               const y1 = Math.min(st.prevY[ch]!, curY);
               const y2 = Math.max(st.prevY[ch]!, curY);
               ctx.fillRect(canvasX, y1, 2, Math.max(2, y2 - y1 + 2));
             } else {
               ctx.fillRect(canvasX, curY, 2, 2);
             }
+
             st.prevY[ch] = curY;
           }
         }
 
         st.writeX = (st.writeX + pxStep) % drawW;
-
-        // Labels cada 0.25s
         st.labelTimer += dt;
         if (st.labelTimer >= 0.25) {
           st.labelTimer = 0;
@@ -586,12 +541,10 @@ const WaveformMonitor: React.FC<Props> = ({ width: widthProp }) => {
 
   return (
     <div ref={wrapperRef} className="w-full leading-[0] relative">
-      {/* h-[480px] = NUM_CH (6) × CH_H (80) — actualizar si cambian las constantes */}
       <canvas
         ref={canvasRef}
         className="block bg-[#060e1e] rounded w-full h-[480px] pointer-events-none"
       />
-      {/* Sonidos de alarma - se asume que los archivos están en /public/sounds/ */}
       <audio ref={audioCriticalRef} src="/sounds/alarm-critical.mp3" loop preload="auto" />
       <audio ref={audioWarningRef} src="/sounds/alarm-warning.mp3" loop preload="auto" />
     </div>

@@ -1,3 +1,4 @@
+/* eslint-disable react/forbid-dom-props */
 import React, { useState, useEffect, useMemo } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { usePathologyStore } from '../store/usePathologyStore';
@@ -5,14 +6,13 @@ import {
   usePatientStore,
   FLUID_CATALOG,
 } from '../store/usePatientStore';
-import type { FluidType } from '../store/usePatientStore';
+import type { FluidType, Vitals } from '../store/usePatientStore';
 
 const CLASS_HEMORRHAGE_RATES: Record<1 | 2 | 3 | 4, number> = {
   1: 8, 2: 20, 3: 45, 4: 90,
 };
 
 const COMPLIANCE_BASE = 50.0;
-
 const BV_NORMAL = 5000;
 const HB_NORMAL = 14.0;
 const MCHC = HB_NORMAL / 0.45;
@@ -94,7 +94,6 @@ function PresetsGrid({ presets, onSelect, progPresets, activeProg, onProgSelect,
   active: boolean;
 }) {
   const RAISED_SHADOW = 'shadow-[inset_0_1px_0_rgba(255,255,255,0.04),4px_4px_10px_rgba(0,0,0,0.7),-2px_-2px_6px_rgba(255,255,255,0.02)]';
-
   return (
     <>
       <div className="grid grid-cols-2 gap-1.5 mb-2">
@@ -121,8 +120,7 @@ function PresetsGrid({ presets, onSelect, progPresets, activeProg, onProgSelect,
                 <button
                   key={p.label}
                   onClick={() => onProgSelect(p.value)}
-                  className={`p-1 rounded-md font-mono text-[0.35rem] font-black cursor-pointer text-center ${RAISED_SHADOW} ${isActive ? 'border border-cyan-500 bg-cyan-500/10 text-cyan-500' : 'border border-white/10 bg-black/30 text-slate-500'
-                    }`}
+                  className={`p-1 rounded-md font-mono text-[0.35rem] font-black cursor-pointer text-center ${RAISED_SHADOW} ${isActive ? 'border border-cyan-500 bg-cyan-500/10 text-cyan-500' : 'border border-white/10 bg-black/30 text-slate-500'}`}
                 >
                   <div>{p.label}</div>
                   <div className="text-[0.65rem] tracking-[0.04em] opacity-60 font-normal">{p.desc}</div>
@@ -135,6 +133,127 @@ function PresetsGrid({ presets, onSelect, progPresets, activeProg, onProgSelect,
     </>
   );
 }
+
+const FluidAdministrationPanel: React.FC<{
+  fluidCat: 'cristaloide' | 'hemo';
+  selFluid: FluidType;
+  selVolume: number;
+  bv: number;
+  crystalloidAccum: number;
+  prbcUnits: number;
+  ffpUnits: number;
+  ratio11Needed: boolean;
+  onFluidCategoryChange: (cat: 'cristaloide' | 'hemo') => void;
+  onFluidSelect: (fluid: FluidType) => void;
+  onVolumeSelect: (vol: number) => void;
+  onAdminister: () => void;
+}> = ({
+  fluidCat, selFluid, selVolume, bv, ratio11Needed, prbcUnits, ffpUnits,
+  onFluidCategoryChange, onFluidSelect, onVolumeSelect, onAdminister
+}) => {
+    const RAISED_SHADOW = 'shadow-[inset_0_1px_0_rgba(255,255,255,0.04),4px_4px_10px_rgba(0,0,0,0.7),-2px_-2px_6px_rgba(255,255,255,0.02)]';
+    const selFluidDef = FLUID_CATALOG[selFluid];
+    const fluidsInCat = (Object.keys(FLUID_CATALOG) as FluidType[])
+      .filter(k => FLUID_CATALOG[k].category === fluidCat);
+
+    return (
+      <div className="bg-black/25 rounded-lg p-2.5 border border-cyan-500/15">
+        <div className="text-cyan-500 font-black text-[0.55rem] tracking-[0.06em] mb-1.5">
+          FLUIDOS
+        </div>
+
+        {ratio11Needed && (
+          <div className="bg-orange-500/10 border border-orange-500/40 rounded p-2 mb-1.5">
+            <div className="text-orange-500 text-[0.65rem] tracking-[0.04em] font-black">
+              Protocolo 1:1:1 — GRE:{prbcUnits}U PFC:{ffpUnits}U
+            </div>
+            <div className="text-orange-500 text-[0.55rem] tracking-[0.04em] opacity-80 mt-0.5">
+              Agregar PFC
+            </div>
+          </div>
+        )}
+
+        <div className="flex gap-1 mb-1.5">
+          {(['cristaloide', 'hemo'] as const).map((cat) => {
+            const active = fluidCat === cat;
+            return (
+              <button
+                key={cat}
+                onClick={() => onFluidCategoryChange(cat)}
+                className={`flex-1 py-1 rounded-md font-mono text-[0.55rem] tracking-[0.04em] font-black cursor-pointer ${active ? 'border border-cyan-500 bg-cyan-500/15 text-cyan-500' : 'border border-white/10 bg-black/30 text-slate-500'}`}
+              >
+                {cat === 'cristaloide' ? 'CRISTALOIDES' : 'HEMOCOMP.'}
+              </button>
+            );
+          })}
+        </div>
+
+        <div className={`grid gap-1 mb-1.5 ${fluidCat === 'cristaloide' ? 'grid-cols-3' : 'grid-cols-2'}`}>
+          {fluidsInCat.map((fk) => {
+            const fd = FLUID_CATALOG[fk];
+            const sel = selFluid === fk;
+            return (
+              <button
+                key={fk}
+                onClick={() => onFluidSelect(fk)}
+                title={fd.desc}
+                className={`p-1 rounded-md cursor-pointer font-mono text-[0.55rem] tracking-[0.06em] font-black text-center ${RAISED_SHADOW}`}
+                style={{
+                  border: `1px solid ${sel ? fd.color : `${fd.color}33`}`,
+                  background: sel ? `${fd.color}18` : 'rgba(0,0,0,0.3)',
+                  color: sel ? fd.color : `${fd.color}aa`,
+                }}
+              >
+                <div className="text-[0.55rem] tracking-[0.08em]">{fd.shortLabel}</div>
+                <div className="text-[0.55rem] tracking-[0.04em] opacity-65 mt-0.5">{fd.label.split(' ')[0]}</div>
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="bg-black/20 rounded-md p-2 mb-1.5">
+          <div className="font-black text-[0.55rem] tracking-[0.06em]" style={{ color: selFluidDef.color }}>{selFluidDef.label}</div>
+          <div className="text-slate-500 text-[0.55rem] tracking-[0.04em] mt-0.5">{selFluidDef.desc}</div>
+        </div>
+
+        <div className="text-slate-500 text-[0.55rem] tracking-[0.04em] mb-1">{selFluidDef.volumeUnit}</div>
+        <div className="flex gap-1 flex-wrap mb-2">
+          {selFluidDef.volumes.map((vol) => {
+            const sel = selVolume === vol;
+            return (
+              <button
+                key={vol}
+                onClick={() => onVolumeSelect(vol)}
+                className={`px-2 py-1 rounded-md font-mono text-[0.55rem] tracking-[0.06em] cursor-pointer ${sel ? 'font-bold' : 'font-normal'}`}
+                style={{
+                  border: `1px solid ${sel ? selFluidDef.color : 'rgba(255,255,255,0.1)'}`,
+                  background: sel ? `${selFluidDef.color}20` : 'rgba(0,0,0,0.3)',
+                  color: sel ? selFluidDef.color : '#6b7a99',
+                }}
+              >
+                {vol >= 1000 ? `${vol / 1000}L` : `${vol}mL`}
+              </button>
+            );
+          })}
+        </div>
+
+        <button
+          onClick={onAdminister}
+          className={`w-full py-2 rounded-md font-mono text-[0.65rem] tracking-[0.1em] font-black cursor-pointer ${RAISED_SHADOW}`}
+          style={{
+            border: `1px solid ${selFluidDef.color}88`,
+            background: `${selFluidDef.color}18`,
+            color: selFluidDef.color,
+          }}
+        >
+          {selVolume >= 1000 ? `${selVolume / 1000}L` : `${selVolume}mL`} {selFluidDef.shortLabel}
+          <div className="text-[0.55rem] tracking-[0.04em] opacity-65 font-normal mt-0.5">
+            {Math.round(bv)} mL + {selVolume}mL
+          </div>
+        </button>
+      </div>
+    );
+  };
 
 export const InstructorPanel: React.FC = () => {
   const RAISED_SHADOW = 'shadow-[inset_0_1px_0_rgba(255,255,255,0.04),4px_4px_10px_rgba(0,0,0,0.7),-2px_-2px_6px_rgba(255,255,255,0.02)]';
@@ -176,17 +295,6 @@ export const InstructorPanel: React.FC = () => {
     return () => window.removeEventListener('keydown', fn);
   }, []);
 
-  useEffect(() => {
-    const vols = FLUID_CATALOG[selFluid].volumes;
-    if (!vols.includes(selVolume)) setSelVolume(vols[0]);
-  }, [selFluid]);
-
-  useEffect(() => {
-    const firstInCat = (Object.keys(FLUID_CATALOG) as FluidType[])
-      .find(k => FLUID_CATALOG[k].category === fluidCat);
-    if (firstInCat) setSelFluid(firstInCat);
-  }, [fluidCat]);
-
   const anyActive = sepsis.isActive || ards.isActive || hemorrhagicShock.isActive;
   const anyCritical = (sepsis.isActive && sepsis.severity > 0.65)
     || (ards.isActive && ards.severity > 0.65)
@@ -196,14 +304,23 @@ export const InstructorPanel: React.FC = () => {
   const sepsisColor = sepsis.severity < 0.30 ? '#34d399'
     : sepsis.severity < 0.55 ? '#fbbf24'
       : sepsis.severity < 0.80 ? '#f97316' : '#ef4444';
+
   const ardsColor = ards.severity < 0.30 ? '#a3e635'
     : ards.severity < 0.55 ? '#fbbf24'
       : ards.severity < 0.80 ? '#f97316' : '#ef4444';
 
+  type VitalsWithLabs = Vitals & {
+    respiratoryRate?: number;
+    lactate: number;
+    pH: number;
+    baseExcess: number;
+  };
+  const typedVitals = vitals as VitalsWithLabs;
+
   const respiratoryMechanics = useMemo(() => {
     const compliance = COMPLIANCE_BASE * modifiers.complianceMultiplier;
     const vt = vent.vt ?? 500;
-    const fr = vitals.respiratoryRate ?? 14;
+    const fr = typedVitals.respiratoryRate ?? 14;
     const deltaP = compliance > 0 ? vt / compliance : 0;
     const pplat = vent.peep + deltaP;
     const ppico = pplat + 5;
@@ -211,7 +328,7 @@ export const InstructorPanel: React.FC = () => {
     const sigma = 1.0 / (1.0 + Math.exp(-(vent.peep - 12) / 2.5));
     const peepRecruitPct = ards.isActive ? (sigma * 0.20 * ards.severity * 100).toFixed(1) : '0.0';
     return { deltaP, pplat, mp, peepRecruitPct };
-  }, [modifiers.complianceMultiplier, vent.vt, vent.peep, vitals.respiratoryRate, ards.isActive, ards.severity]);
+  }, [modifiers.complianceMultiplier, vent.vt, vent.peep, typedVitals.respiratoryRate, ards.isActive, ards.severity]);
 
   const traumaStatus = useMemo(() => {
     const { label: atlasLabel, color: atlasColor, pct: pctLoss } = atlasClassFromBV(bv);
@@ -220,11 +337,26 @@ export const InstructorPanel: React.FC = () => {
     return { atlasLabel, atlasColor, pctLoss, bvLost, hbLive };
   }, [bv, rbc]);
 
-  const acidosisAlarm = vitals.lactate > 4 || vitals.pH < 7.20 || vitals.baseExcess < -6;
+  const acidosisAlarm = typedVitals.lactate > 4 || typedVitals.pH < 7.20 || typedVitals.baseExcess < -6;
   const hemoDilAlarm = traumaStatus.hbLive < 8;
   const critVolAlarm = bv < 2500;
   const anyTraumaAlarm = acidosisAlarm || hemoDilAlarm || critVolAlarm;
   const ratio11Needed = prbcUnits > 0 && prbcUnits > ffpUnits + 1;
+
+  const handleFluidCategoryChange = (cat: 'cristaloide' | 'hemo') => {
+    setFluidCat(cat);
+    const firstInCat = (Object.keys(FLUID_CATALOG) as FluidType[])
+      .find(k => FLUID_CATALOG[k].category === cat);
+    if (firstInCat) {
+      setSelFluid(firstInCat);
+      setSelVolume(FLUID_CATALOG[firstInCat].volumes[0]);
+    }
+  };
+
+  const handleFluidSelect = (fluid: FluidType) => {
+    setSelFluid(fluid);
+    setSelVolume(FLUID_CATALOG[fluid].volumes[0]);
+  };
 
   const sepsisTag = sepsis.isActive ? `S${Math.round(sepsis.severity * 100)}` : '';
   const ardsTag = ards.isActive ? `A${Math.round(ards.severity * 100)}` : '';
@@ -232,22 +364,14 @@ export const InstructorPanel: React.FC = () => {
   const tags = [sepsisTag, ardsTag, traumaTag].filter(Boolean).join('/');
   const tabLabel = tags || 'INSTR';
 
-  const selFluidDef = FLUID_CATALOG[selFluid];
-  const fluidsInCat = (Object.keys(FLUID_CATALOG) as FluidType[])
-    .filter(k => FLUID_CATALOG[k].category === fluidCat);
-
   const tabBtn = (
     <button
       onClick={() => setOpen(v => !v)}
       title="Panel Instructor (F2)"
-      className={`fixed top-10 z-[2000] w-[38px] h-[20px] bg-[#0c1020] rounded-b-md cursor-pointer flex items-center justify-center shadow-lg transition-all duration-250 ${open ? 'right-[280px]' : 'right-[12px]'
-        }`}
+      className={`fixed top-10 z-[2000] w-[38px] h-[20px] bg-[#0c1020] rounded-b-md cursor-pointer flex items-center justify-center shadow-lg transition-all duration-250 ${open ? 'right-[280px]' : 'right-[12px]'}`}
       style={{ border: `1px solid ${tabColor}88` }}
     >
-      <span
-        className="font-mono text-[0.45rem] font-black tracking-[0.05em]"
-        style={{ color: tabColor }}
-      >
+      <span className="font-mono text-[0.45rem] font-black tracking-[0.05em]" style={{ color: tabColor }}>
         {tabLabel}
       </span>
     </button>
@@ -328,11 +452,7 @@ export const InstructorPanel: React.FC = () => {
                 { label: 'BV actual', value: `${Math.round(bv)} mL`, alert: bv < 3000 },
                 { label: 'Perdida', value: `${Math.round(traumaStatus.pctLoss)}% / ${Math.round(traumaStatus.bvLost)}mL`, alert: traumaStatus.pctLoss > 30 },
                 { label: 'Hb live', value: `${traumaStatus.hbLive.toFixed(1)} g/dL`, alert: traumaStatus.hbLive < 8 },
-                {
-                  label: 'Sangrado', value: hemorrhagicShock.tourniquetApplied
-                    ? 'DETENIDO'
-                    : `${hemorrhagicShock.hemorrhageRate}mL/min`, alert: !hemorrhagicShock.tourniquetApplied
-                },
+                { label: 'Sangrado', value: hemorrhagicShock.tourniquetApplied ? 'DETENIDO' : `${hemorrhagicShock.hemorrhageRate}mL/min`, alert: !hemorrhagicShock.tourniquetApplied },
               ].map((item) => (
                 <div
                   key={item.label}
@@ -374,28 +494,30 @@ export const InstructorPanel: React.FC = () => {
             {sepsis.isActive && (
               <div className="mb-2">
                 <div className="flex justify-between mb-1">
-                  <span className="text-slate-500 text-[0.4rem]">Severidad manual</span>
+                  <label htmlFor="sepsis-severity-slider" className="text-slate-500 text-[0.4rem] cursor-pointer">Severidad manual</label>
                   <span className="text-[0.4rem] font-black" style={{ color: sepsisColor }}>{Math.round(sepsis.severity * 100)}%</span>
                 </div>
                 <input
+                  id="sepsis-severity-slider"
                   type="range" min={0} max={100} step={1}
                   value={Math.round(sepsis.severity * 100)}
                   onChange={(e) => setSepsisSev(Number(e.target.value) / 100)}
+                  aria-label="Ajustar severidad de sepsis"
+                  title="Ajustar severidad de sepsis"
                   className="w-full cursor-pointer"
                   style={{ accentColor: sepsisColor }}
                 />
               </div>
             )}
-            {!sepsis.isActive
-              ? (
-                <button onClick={() => activateSepsis(0.15)} className={`w-full py-1.5 rounded-md border border-orange-500/40 bg-orange-500/10 text-orange-500 font-mono text-[0.5rem] font-black cursor-pointer ${RAISED_SHADOW}`}>
-                  INYECTAR SEPSIS
-                </button>
-              ) : (
-                <button onClick={deactivateSepsis} className={`w-full py-1.5 rounded-md border border-red-500/50 bg-red-500/15 text-red-500 font-mono text-[0.5rem] font-black cursor-pointer ${RAISED_SHADOW}`}>
-                  DETENER SEPSIS
-                </button>
-              )
+            {!sepsis.isActive ? (
+              <button onClick={() => activateSepsis(0.15)} className={`w-full py-1.5 rounded-md border border-orange-500/40 bg-orange-500/10 text-orange-500 font-mono text-[0.5rem] font-black cursor-pointer ${RAISED_SHADOW}`}>
+                INYECTAR SEPSIS
+              </button>
+            ) : (
+              <button onClick={deactivateSepsis} className={`w-full py-1.5 rounded-md border border-red-500/50 bg-red-500/15 text-red-500 font-mono text-[0.5rem] font-black cursor-pointer ${RAISED_SHADOW}`}>
+                DETENER SEPSIS
+              </button>
+            )
             }
           </div>
         )}
@@ -421,13 +543,16 @@ export const InstructorPanel: React.FC = () => {
               <>
                 <div className="mb-2">
                   <div className="flex justify-between mb-1">
-                    <span className="text-slate-500 text-[0.4rem]">Severidad manual</span>
+                    <label htmlFor="ards-severity-slider" className="text-slate-500 text-[0.4rem] cursor-pointer">Severidad manual</label>
                     <span className="text-[0.4rem] font-black" style={{ color: ardsColor }}>{Math.round(ards.severity * 100)}%</span>
                   </div>
                   <input
+                    id="ards-severity-slider"
                     type="range" min={0} max={100} step={1}
                     value={Math.round(ards.severity * 100)}
                     onChange={(e) => setArdsSev(Number(e.target.value) / 100)}
+                    aria-label="Ajustar severidad de SDRA"
+                    title="Ajustar severidad de SDRA"
                     className="w-full cursor-pointer"
                     style={{ accentColor: ardsColor }}
                   />
@@ -442,16 +567,15 @@ export const InstructorPanel: React.FC = () => {
                 </button>
               </>
             )}
-            {!ards.isActive
-              ? (
-                <button onClick={() => activateArds(0.15)} className={`w-full py-1.5 rounded-md border border-cyan-500/40 bg-cyan-500/10 text-cyan-500 font-mono text-[0.5rem] font-black cursor-pointer ${RAISED_SHADOW}`}>
-                  INYECTAR SDRA
-                </button>
-              ) : (
-                <button onClick={deactivateArds} className={`w-full py-1.5 rounded-md border border-red-500/50 bg-red-500/15 text-red-500 font-mono text-[0.5rem] font-black cursor-pointer ${RAISED_SHADOW}`}>
-                  DETENER SDRA
-                </button>
-              )
+            {!ards.isActive ? (
+              <button onClick={() => activateArds(0.15)} className={`w-full py-1.5 rounded-md border border-cyan-500/40 bg-cyan-500/10 text-cyan-500 font-mono text-[0.5rem] font-black cursor-pointer ${RAISED_SHADOW}`}>
+                INYECTAR SDRA
+              </button>
+            ) : (
+              <button onClick={deactivateArds} className={`w-full py-1.5 rounded-md border border-red-500/50 bg-red-500/15 text-red-500 font-mono text-[0.5rem] font-black cursor-pointer ${RAISED_SHADOW}`}>
+                DETENER SDRA
+              </button>
+            )
             }
           </div>
         )}
@@ -492,7 +616,7 @@ export const InstructorPanel: React.FC = () => {
                     <div className="flex justify-between text-red-500 text-[0.65rem] tracking-[0.04em]">
                       <span>ACIDOSIS</span>
                       <span className="opacity-80">
-                        Lac {vitals.lactate.toFixed(1)} pH {vitals.pH.toFixed(2)} BE {vitals.baseExcess.toFixed(1)}
+                        Lac {typedVitals.lactate.toFixed(1)} pH {typedVitals.pH.toFixed(2)} BE {typedVitals.baseExcess.toFixed(1)}
                       </span>
                     </div>
                   )}
@@ -562,102 +686,22 @@ export const InstructorPanel: React.FC = () => {
             )}
 
             {/* Panel Fluidos */}
-            <div className="bg-black/25 rounded-lg p-2.5 border border-cyan-500/15">
-              <div className="text-cyan-500 font-black text-[0.55rem] tracking-[0.06em] mb-1.5">
-                FLUIDOS
-              </div>
+            <FluidAdministrationPanel
+              fluidCat={fluidCat}
+              selFluid={selFluid}
+              selVolume={selVolume}
+              bv={bv}
+              crystalloidAccum={crystalloidAccum}
+              prbcUnits={prbcUnits}
+              ffpUnits={ffpUnits}
+              ratio11Needed={ratio11Needed}
+              onFluidCategoryChange={handleFluidCategoryChange}
+              onFluidSelect={handleFluidSelect}
+              onVolumeSelect={setSelVolume}
+              onAdminister={() => administerFluid(selFluid, selVolume)}
+            />
 
-              {ratio11Needed && (
-                <div className="bg-orange-500/10 border border-orange-500/40 rounded p-2 mb-1.5">
-                  <div className="text-orange-500 text-[0.65rem] tracking-[0.04em] font-black">
-                    Protocolo 1:1:1 — GRE:{prbcUnits}U PFC:{ffpUnits}U
-                  </div>
-                  <div className="text-orange-500 text-[0.55rem] tracking-[0.04em] opacity-80 mt-0.5">
-                    Agregar PFC
-                  </div>
-                </div>
-              )}
-
-              <div className="flex gap-1 mb-1.5">
-                {(['cristaloide', 'hemo'] as const).map((cat) => {
-                  const active = fluidCat === cat;
-                  return (
-                    <button
-                      key={cat}
-                      onClick={() => setFluidCat(cat)}
-                      className={`flex-1 py-1 rounded-md font-mono text-[0.55rem] tracking-[0.04em] font-black cursor-pointer ${active ? 'border border-cyan-500 bg-cyan-500/15 text-cyan-500' : 'border border-white/10 bg-black/30 text-slate-500'
-                        }`}
-                    >
-                      {cat === 'cristaloide' ? 'CRISTALOIDES' : 'HEMOCOMP.'}
-                    </button>
-                  );
-                })}
-              </div>
-
-              <div className={`grid gap-1 mb-1.5 ${fluidCat === 'cristaloide' ? 'grid-cols-3' : 'grid-cols-2'}`}>
-                {fluidsInCat.map((fk) => {
-                  const fd = FLUID_CATALOG[fk];
-                  const sel = selFluid === fk;
-                  return (
-                    <button
-                      key={fk}
-                      onClick={() => setSelFluid(fk)}
-                      title={fd.desc}
-                      className={`p-1 rounded-md cursor-pointer font-mono text-[0.55rem] tracking-[0.06em] font-black text-center ${RAISED_SHADOW}`}
-                      style={{
-                        border: `1px solid ${sel ? fd.color : `${fd.color}33`}`,
-                        background: sel ? `${fd.color}18` : 'rgba(0,0,0,0.3)',
-                        color: sel ? fd.color : `${fd.color}aa`,
-                      }}
-                    >
-                      <div className="text-[0.55rem] tracking-[0.08em]">{fd.shortLabel}</div>
-                      <div className="text-[0.55rem] tracking-[0.04em] opacity-65 mt-0.5">{fd.label.split(' ')[0]}</div>
-                    </button>
-                  );
-                })}
-              </div>
-
-              <div className="bg-black/20 rounded-md p-2 mb-1.5">
-                <div className="font-black text-[0.55rem] tracking-[0.06em]" style={{ color: selFluidDef.color }}>{selFluidDef.label}</div>
-                <div className="text-slate-500 text-[0.55rem] tracking-[0.04em] mt-0.5">{selFluidDef.desc}</div>
-              </div>
-
-              <div className="text-slate-500 text-[0.55rem] tracking-[0.04em] mb-1">{selFluidDef.volumeUnit}</div>
-              <div className="flex gap-1 flex-wrap mb-2">
-                {selFluidDef.volumes.map((vol) => {
-                  const sel = selVolume === vol;
-                  return (
-                    <button
-                      key={vol}
-                      onClick={() => setSelVolume(vol)}
-                      className={`px-2 py-1 rounded-md font-mono text-[0.55rem] tracking-[0.06em] cursor-pointer ${sel ? 'font-bold' : 'font-normal'}`}
-                      style={{
-                        border: `1px solid ${sel ? selFluidDef.color : 'rgba(255,255,255,0.1)'}`,
-                        background: sel ? `${selFluidDef.color}20` : 'rgba(0,0,0,0.3)',
-                        color: sel ? selFluidDef.color : '#6b7a99',
-                      }}
-                    >
-                      {vol >= 1000 ? `${vol / 1000}L` : `${vol}mL`}
-                    </button>
-                  );
-                })}
-              </div>
-
-              <button
-                onClick={() => administerFluid(selFluid, selVolume)}
-                className={`w-full py-2 rounded-md font-mono text-[0.65rem] tracking-[0.1em] font-black cursor-pointer ${RAISED_SHADOW}`}
-                style={{
-                  border: `1px solid ${selFluidDef.color}88`,
-                  background: `${selFluidDef.color}18`,
-                  color: selFluidDef.color,
-                }}
-              >
-                {selVolume >= 1000 ? `${selVolume / 1000}L` : `${selVolume}mL`} {selFluidDef.shortLabel}
-                <div className="text-[0.55rem] tracking-[0.04em] opacity-65 font-normal mt-0.5">
-                  {Math.round(bv)} mL + {selVolume}mL
-                </div>
-              </button>
-
+            <div className="flex flex-col gap-2">
               <div className="grid grid-cols-2 gap-1 mt-1.5">
                 <div className="bg-black/20 rounded p-1">
                   <div className="text-slate-500 text-[0.55rem] tracking-[0.04em]">Cristaloides</div>
@@ -680,8 +724,7 @@ export const InstructorPanel: React.FC = () => {
                 className={`w-full py-1.5 rounded-md border border-violet-400/40 bg-violet-400/10 text-violet-400 font-mono text-[0.5rem] font-black cursor-pointer ${RAISED_SHADOW}`}>
                 TERMINAR ESCENARIO HEMORRAGIA
               </button>
-            )
-            }
+            )}
           </div>
         )}
 
@@ -697,7 +740,6 @@ export const InstructorPanel: React.FC = () => {
           <button
             onClick={() => {
               resetAll();
-              resetFluidTracking();
               import('../core/RespiratoryEngine').then(({ RespiratoryEngine }) =>
                 RespiratoryEngine.getInstance().reset()
               );

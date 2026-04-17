@@ -181,9 +181,11 @@ export const usePathologyStore = create<PathologyState>((set) => ({
 
   deactivateHemorrhagicShock: () =>
     set((s) => {
-      // También resetea la tasa de sangrado en el patientStore
+      // SOLUCIÓN 3: Centralizar la lógica. Resetear la tasa de sangrado aquí.
       import('./usePatientStore').then(m => m.usePatientStore.getState().setHemorrhageRate(0));
-      return { hemorrhagicShock: { ...INITIAL_HEMORRHAGIC_SHOCK } };
+      // También resetea el conteo de fluidos
+      import('./usePatientStore').then(m => m.usePatientStore.getState().resetFluidTracking());
+      return { hemorrhagicShock: { ...s.hemorrhagicShock, isActive: false, hemorrhageRate: 0 } };
     }),
 
   setHemorrhageClass: (shockClass) =>
@@ -212,7 +214,8 @@ export const usePathologyStore = create<PathologyState>((set) => ({
     set({
       sepsis: { ...INITIAL_SEPSIS },
       ards: { ...INITIAL_ARDS },
-      hemorrhagicShock: { ...INITIAL_HEMORRHAGIC_SHOCK },
+      // Llama a la acción correcta para asegurar que la tasa de sangrado también se resetee
+      ...(() => { get().deactivateHemorrhagicShock(); return {}; })(),
       modifiers: { ...NEUTRAL_MODIFIERS },
     }),
 }));
