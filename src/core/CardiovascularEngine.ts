@@ -1,15 +1,28 @@
 // src/core/CardiovascularEngine.ts
 //
-// REGLA DE ARQUITECTURA:
-//   Este engine SOLO lee PDSystemicEffects — NUNCA plasmaConcentrations.
-//   Los efectos droga-específicos se modelan en DrugPDProfile (usePharmacologyStore).
-//   Esto garantiza que añadir nuevas drogas no requiera tocar este archivo.
+// ═══════════════════════════════════════════════════════════════════════════════
+//  CardiovascularEngine — hemodinamia acoplada a SV800Engine
+// ═══════════════════════════════════════════════════════════════════════════════
 //
+//  REGLA DE ARQUITECTURA:
+//    Este engine SOLO lee PDSystemicEffects — NUNCA plasmaConcentrations.
+//    Los efectos droga-específicos se modelan en DrugPDProfile (usePharmacologyStore).
+//
+//  CAMBIOS vs. versión anterior:
+//    • Sección 2-3 (mecánica resp → SV) usa computeHemodynamicCoupling() del
+//      motor SV800 para incorporar TPP → PVR y Ppl → retorno venoso.
+//    • Sinergia nueva hemorragia × PEEP (Berger 2016, Berlin 2019).
+//    • Amplificador sepsis × Pplat > 25 (Vallabhajosyula Chest 2021).
+//    • Lanspa 2020: RV dysfunction silente en sepsis severity > 0.5.
+//    • Flag `acpHighRisk` publicado a vitals.
+//
+// ═══════════════════════════════════════════════════════════════════════════════
 
 import { usePatientStore } from '../store/usePatientStore';
 import { usePathologyStore } from '../store/usePathologyStore';
 import { usePharmacologyStore } from '../store/usePharmacologyStore';
 import { useMicrobiologyStore } from '../store/useMicrobiologyStore';
+import { computeHemodynamicCoupling } from './VentilatorSV800Engine';
 
 // ─── CONSTANTES HEMODINÁMICAS ─────────────────────────────────────────────
 const HR_HOMEO = 0.05;
@@ -26,24 +39,31 @@ const SV_BASE = 70;
 const SV_MIN = 10;
 const NOISE_INT = 1.0;
 
-// ─── CONSTANTES RESPIRATORIAS ─────────────────────────────────────────────
+// ─── CONSTANTES RESPIRATORIAS (fallback, si vitals aún no publicados) ─────
 const LUNG_COMPLIANCE_DEFAULT = 50;
 const PAW_ITT_RATIO = 0.33;
-const PEEP_THRESHOLD = 10;
-const PPLAT_THRESHOLD = 25;
 
-const SV_PEEP_PENALTY = 0.02;
-const SV_PPLAT_PENALTY = 0.01;
-const PEEP_CVP_TRANSMISSION = 0.5;
-
+// ─── CONSTANTES HIPOVOLEMIA ─────────────────────────────────────────────
 const HYPO_AMPLIFIER_FLOOR = 4000;
 const HYPO_AMPLIFIER_SCALE = 2000;
 
+// ─── PLETISMOGRAFÍA ─────────────────────────────────────────────────────
 const PAW_PLETH_THRESHOLD = 10;
 const PAW_PLETH_PENALTY = 0.03;
 
-// ─── CONSTANTES RECUPERACIÓN ANTIMICROBIANA (LOGÍSTICA) ───────────────────
-// Ref: Rhodes A (Surviving Sepsis 2016) / Kumar A (Crit Care Med 2006)
+// ─── SINERGIA HEMO × PEEP (Berger 2016 AJP-HCP; Berlin 2019 ICM Exp) ────
+const HEMO_PEEP_SYNERGY_COEFF = 0.08;
+const HEMO_PEEP_SYNERGY_MAX   = 0.50;
+
+// ─── ACP / RV dysfunction (Lanspa Chest 2020; Vallabhajosyula Chest 2021) ─
+const ACP_SV_PENALTY           = 0.15;   // 15% adicional si ACP confirmado
+const ACP_HR_BONUS             = 18;     // bpm compensación taquicárdica
+const SEPSIS_RVD_SV_PENALTY    = 0.08;   // RV silent dysfunction sepsis
+const SEPSIS_RVD_HR_BONUS      = 8;
+const SEPSIS_PPLAT_AMPLIFIER   = 0.0040; // por cmH₂O Pplat > 25 × severidad
+const SEPSIS_PPLAT_THR         = 25;
+
+// ─── RECUPERACIÓN ANTIMICROBIANA LOGÍSTICA (Kumar CCM 2006; Rhodes SSC 2016) ─
 const RECOVERY_TAU_EMPIRIC = 28800;   // ~8h
 const RECOVERY_TAU_TARGETED = 14400;  // ~4h
 const RECOVERY_MAP_BONUS_MAX = 12;    // mmHg max
@@ -76,7 +96,8 @@ export class CardiovascularEngine {
 
     // ─── ESTADOS EXTERNOS ──────────────────────────────────────────────────
     const { systemicEffects: pd } = usePharmacologyStore.getState();
-    const { modifiers, ards } = usePathologyStore.getState();
+    const path = usePathologyStore.getState();
+    const { modifiers, ards, sepsis } = path;
     const { svrMultiplier, hyperdynamicFactor, capillaryLeakRate } = modifiers;
 
     // ─── 1. VOLEMIA (Hemorragia + Fuga Capilar) ────────────────────────────
@@ -90,45 +111,93 @@ export class CardiovascularEngine {
     vol = Math.max(0, vol);
     setBV(vol);
 
-    // ─── 2. MECÁNICA RESPIRATORIA Y PRESIONES ──────────────────────────────
-    const peep = v.peep ?? vent.peep;
+    // ─── 2. MECÁNICA RESPIRATORIA (leída del SV800Engine vía vitals) ───────
+    const peep = vent.peep;
     const pmean = v.meanAirwayPressure ?? peep;
     const pplat = v.pplat || (peep + (vent.vt / LUNG_COMPLIANCE_DEFAULT) * PAW_ITT_RATIO);
 
-    const peepExcessForCvp = Math.max(0, peep - PEEP_THRESHOLD);
-    const pmeanExcessForSv = Math.max(0, pmean - PEEP_THRESHOLD);
-    const pplatExcess = Math.max(0, pplat - PPLAT_THRESHOLD);
+    // Ppl promedio (estimación por fracción E_cw/E_tot)
+    //   Paciente paralizado sin SDRA: ratio ≈ 0.7
+    //   SDRA severo: pared torácica más "rígida" relativa → ratio ≈ 0.5
+    //   (Talmor NEJM 2008, Vieillard-Baron ICM 2016)
+    const ratioEcw = ards.isActive ? 0.5 - ards.severity * 0.15 : 0.7;
+    const pplMean = Math.max(-10, ratioEcw * Math.max(0, pmean - peep) - 5);
 
-    // ─── 3. VOLUMEN SISTÓLICO (SV) Y COR PULMONALE ─────────────────────────
+    // ─── 3. ACOPLAMIENTO VENTILACIÓN → HEMODINAMIA (SV800Engine) ───────────
+    //   Vieillard-Baron ICM 2016: TPP → PVR; Ppl → retorno venoso.
+    //   Berger AJP-HCP 2016: PEEP transmite ~0.5 cmH₂O/cmH₂O a CVP.
+    //   Lanspa Chest 2020: ACP flag si Pplat > 27 + substrato severo.
+    const coupling = computeHemodynamicCoupling({
+      pMean: pmean,
+      pPlat: pplat,
+      pplMean,
+      pplSwing: Math.max(0, pplat - pplMean),
+      peep,
+      ardsActive: ards.isActive,
+      ardsSeverity: ards.severity,
+      sepsisActive: sepsis.isActive,
+      sepsisSeverity: sepsis.severity,
+    });
+
+    // ─── 4. VOLUMEN SISTÓLICO (SV) ─────────────────────────────────────────
     let sv = Math.max(SV_MIN, SV_BASE * (vol / BV_BASE));
     const hypoAmplifier = vol < HYPO_AMPLIFIER_FLOOR
       ? 1.0 + (HYPO_AMPLIFIER_FLOOR - vol) / HYPO_AMPLIFIER_SCALE
       : 1.0;
 
-    // Penalización combinada por Pmean (precarga) y Pplat (postcarga VD)
-    const totalSvPenaltyFactor = (pmeanExcessForSv * SV_PEEP_PENALTY) + (pplatExcess * SV_PPLAT_PENALTY);
-    const svPenalty = Math.min(0.85, totalSvPenaltyFactor * hypoAmplifier);
+    // 4a. Sinergia hemorragia × PEEP (Berger 2016, Berlin 2019)
+    //     Pacientes hipovolémicos tienen más pérdida de VR ante el mismo PEEP.
+    const hypovolemiaFrac = Math.max(0, (BV_BASE - vol) / BV_BASE);
+    const peepExcess5 = Math.max(0, peep - 5);
+    const hemoSynergy = Math.min(
+      HEMO_PEEP_SYNERGY_MAX,
+      hypovolemiaFrac * peepExcess5 * HEMO_PEEP_SYNERGY_COEFF,
+    );
 
-    sv = Math.max(SV_MIN, sv * (1.0 - svPenalty));
-    sv += pd.beta1 * 8; // inotropismo β₁
+    // 4b. Sepsis × Pplat > 25 (Vallabhajosyula 2021)
+    //     RV dysfunction meta-OR 2.42; sensibilidad adicional a Pplat.
+    const sepsisAmp = (sepsis.isActive && pplat > SEPSIS_PPLAT_THR)
+      ? sepsis.severity * (pplat - SEPSIS_PPLAT_THR) * SEPSIS_PPLAT_AMPLIFIER
+      : 0;
 
+    // 4c. Penalización total aplicada a SV
+    const totalSvPenalty = Math.min(
+      0.85,
+      (coupling.svPenalty + hemoSynergy + sepsisAmp) * hypoAmplifier,
+    );
+    sv = Math.max(SV_MIN, sv * (1.0 - totalSvPenalty));
+    sv += pd.beta1 * 8;  // inotropismo β₁
+
+    // 4d. Cor Pulmonale agudo (Pplat>27 + SDRA sev o sepsis+SDRA)
     let corPulmonaleSvrFactor = 1.0;
     let corPulmonaleHrBonus = 0;
+    if (coupling.acpHighRisk) {
+      sv *= (1 - ACP_SV_PENALTY);
+      corPulmonaleSvrFactor = 0.85;
+      corPulmonaleHrBonus = ACP_HR_BONUS;
+    } else if (ards.isActive && ards.severity >= 0.6) {
+      // Fallback legacy: SDRA sev sin cumplir ACP formal
+      sv *= 0.80;
+      corPulmonaleSvrFactor = 0.85;
+      corPulmonaleHrBonus = 15;
+    }
 
-    if (ards?.isActive && ards.severity >= 0.6) {
-      sv *= 0.80; // Caída del VS por fallo del VD
-      corPulmonaleSvrFactor = 0.85; // Vasodilatación refractaria
-      corPulmonaleHrBonus = 15; // Taquicardia reactiva
+    // 4e. Lanspa: RV dysfunction silente en sepsis severa
+    if (sepsis.isActive && sepsis.severity > 0.50) {
+      sv *= (1 - SEPSIS_RVD_SV_PENALTY);
+      corPulmonaleHrBonus += SEPSIS_RVD_HR_BONUS;
     }
 
     sv = Math.min(130, sv);
 
-    // ─── 4. PRESIÓN VENOSA CENTRAL (CVP) ───────────────────────────────────
+    // ─── 5. PRESIÓN VENOSA CENTRAL (CVP) ───────────────────────────────────
     const newCVP = Math.max(0, Math.round(
-      CVP_BASE + (vol - BV_BASE) / CVP_FACTOR + peepExcessForCvp * PEEP_CVP_TRANSMISSION
+      CVP_BASE
+      + (vol - BV_BASE) / CVP_FACTOR
+      + coupling.cvpTransmission
     ));
 
-    // ─── 5. FRECUENCIA CARDÍACA (HR) ───────────────────────────────────────
+    // ─── 6. FRECUENCIA CARDÍACA (HR) ───────────────────────────────────────
     const pao2 = v.paO2 || 95;
     const fio2 = vent.fio2 || 0.21;
     const pfRatio = pao2 / fio2;
@@ -163,7 +232,7 @@ export class CardiovascularEngine {
       );
     }
 
-    // ─── 6. RESISTENCIA VASCULAR, GASTO CARDÍACO Y PAM ─────────────────────
+    // ─── 7. RESISTENCIA VASCULAR, GASTO CARDÍACO Y PAM ─────────────────────
     const DynSvrAlpha = pd.alpha1 * 800;
     const DynSvrVaso = pd.vasoplegiaRev * 600;
     const dynSvr = v.baseSvr * svrMultiplier * corPulmonaleSvrFactor + DynSvrAlpha + DynSvrVaso;
@@ -171,7 +240,7 @@ export class CardiovascularEngine {
     const co = Number(((newHR * sv) / 1000).toFixed(1));
     const baseMap = Math.round((co * dynSvr) / 80 + newCVP);
 
-    // ─── 7. RECUPERACIÓN LOGÍSTICA ANTIMICROBIANA ──────────────────────────
+    // ─── 8. RECUPERACIÓN LOGÍSTICA ANTIMICROBIANA ──────────────────────────
     const { treatmentEfficacy } = useMicrobiologyStore.getState();
     const isEffective = treatmentEfficacy === 'targeted' || treatmentEfficacy === 'empiric_match';
 
@@ -199,7 +268,7 @@ export class CardiovascularEngine {
     const dbp = Math.round(map - 40 / 3);
     const sbp = Math.round(dbp + 40);
 
-    // ─── 8. ONDA DE PLETISMOGRAFÍA (Pleth Amplitude) ───────────────────────
+    // ─── 9. ONDA DE PLETISMOGRAFÍA (Pleth Amplitude) ───────────────────────
     const pmeanExcessForPleth = Math.max(0, pmean - PAW_PLETH_THRESHOLD);
     const plethPenalty = pmeanExcessForPleth * PAW_PLETH_PENALTY;
 
@@ -213,7 +282,7 @@ export class CardiovascularEngine {
     pleth *= (1.0 - Math.min(0.7, plethPenalty));
     pleth = Math.max(0.03, Math.min(1.5, pleth));
 
-    // ─── 9. ACTUALIZACIÓN DEL STORE ────────────────────────────────────────
+    // ─── 10. ACTUALIZACIÓN DEL STORE ───────────────────────────────────────
     upd({
       cardiacOutput: co,
       svr: Math.round(dynSvr),
@@ -236,14 +305,13 @@ export class CardiovascularEngine {
     dt: number,
   ): { temperature: number } {
     const pctLoss = Math.max(0, (BV_BASE - bv) / BV_BASE);
-    const hemorrHypothermia = pctLoss > 0.15 ? Math.min(3.0, ((pctLoss - 0.15) / 0.35) * 3.0) : 0;
-
-    const pharmOffset = thermoDepression * -2.0;
-    const targetTemp = 37.0 - hemorrHypothermia + pharmOffset;
-
-    const tau = 600;
-    const newT = currentTemp + (targetTemp - currentTemp) * (1 - Math.exp(-dt / tau));
-
-    return { temperature: Math.round(Math.max(28.0, Math.min(41.5, newT)) * 10) / 10 };
+    const hemorrHypothermia = pctLoss > 0.15
+      ? -0.4 * (pctLoss - 0.15)
+      : 0;
+    const drugHypothermia = thermoDepression * -2.0;
+    const targetT = 37.0 + hemorrHypothermia + drugHypothermia;
+    const tau = 300; // s (respuesta lenta térmica)
+    const newT = currentTemp + (targetT - currentTemp) * (dt / tau);
+    return { temperature: Math.round(newT * 10) / 10 };
   }
 }
