@@ -52,8 +52,15 @@ const PAW_PLETH_THRESHOLD = 10;
 const PAW_PLETH_PENALTY = 0.03;
 
 // ─── SINERGIA HEMO × PEEP (Berger 2016 AJP-HCP; Berlin 2019 ICM Exp) ────
-const HEMO_PEEP_SYNERGY_COEFF = 0.08;
-const HEMO_PEEP_SYNERGY_MAX   = 0.50;
+//   Amplificado vs. versión anterior — hipovolemia grave + PEEP alto → colapso
+const HEMO_PEEP_SYNERGY_COEFF = 0.12;   // 0.08 → 0.12
+const HEMO_PEEP_SYNERGY_MAX   = 0.60;   // 0.50 → 0.60
+
+// ─── INTERACCIÓN DIRECTA PEEP → RETORNO VENOSO ───────────────────────────
+//   Cada 1 cmH₂O de PEEP sobre 5 reduce el retorno venoso ~2 mL latido
+//   (Jardin ICM 1992; Schmitt AJRCCM 2001)
+const PEEP_VR_REDUCTION_PER_CMH2O = 0.025;   // fracción de SV por cmH₂O exceso
+const PEEP_VR_THRESHOLD           = 5;        // cmH₂O — por debajo sin efecto
 
 // ─── ACP / RV dysfunction (Lanspa Chest 2020; Vallabhajosyula Chest 2021) ─
 const ACP_SV_PENALTY           = 0.15;   // 15% adicional si ACP confirmado
@@ -111,9 +118,13 @@ export class CardiovascularEngine {
     vol = Math.max(0, vol);
     setBV(vol);
 
-    // ─── 2. MECÁNICA RESPIRATORIA (leída del SV800Engine vía vitals) ───────
-    const peep = vent.peep;
-    const pmean = v.meanAirwayPressure ?? peep;
+    // ─── 2. MECÁNICA RESPIRATORIA ────────────────────────────────────────────
+    // Fase 5: usar ventilator.pMean (escrito por RespiratoryEngine en el mismo
+    // tick, después del reorder Resp → Cardio en CronosEngine).
+    // Fórmula: SV_adj = SV_base × (1 − k × max(0, pMean − 5))
+    //          k = 0.025  (Jardin ICM 1992; Schmitt AJRCCM 2001)
+    const peep  = vent.peep;
+    const pmean = vent.pMean > 0 ? vent.pMean : (v.meanAirwayPressure ?? peep);
     const pplat = v.pplat || (peep + (vent.vt / LUNG_COMPLIANCE_DEFAULT) * PAW_ITT_RATIO);
 
     // Ppl promedio (estimación por fracción E_cw/E_tot)
@@ -155,15 +166,23 @@ export class CardiovascularEngine {
     );
 
     // 4b. Sepsis × Pplat > 25 (Vallabhajosyula 2021)
-    //     RV dysfunction meta-OR 2.42; sensibilidad adicional a Pplat.
     const sepsisAmp = (sepsis.isActive && pplat > SEPSIS_PPLAT_THR)
       ? sepsis.severity * (pplat - SEPSIS_PPLAT_THR) * SEPSIS_PPLAT_AMPLIFIER
       : 0;
 
+    // 4b². Reducción directa de retorno venoso por PEEP (Jardin ICM 1992)
+    //   Efecto mayor en hipovolemia: paciente con BV < 4500 mL tiene poco buffer
+    //   venoso para tolerar la caída del gradiente de presión venosa.
+    const peepExcessVR = Math.max(0, peep - PEEP_VR_THRESHOLD);
+    const peepVRPenalty = Math.min(
+      0.40,
+      peepExcessVR * PEEP_VR_REDUCTION_PER_CMH2O * hypoAmplifier,
+    );
+
     // 4c. Penalización total aplicada a SV
     const totalSvPenalty = Math.min(
       0.85,
-      (coupling.svPenalty + hemoSynergy + sepsisAmp) * hypoAmplifier,
+      (coupling.svPenalty + hemoSynergy + sepsisAmp + peepVRPenalty) * hypoAmplifier,
     );
     sv = Math.max(SV_MIN, sv * (1.0 - totalSvPenalty));
     sv += pd.beta1 * 8;  // inotropismo β₁

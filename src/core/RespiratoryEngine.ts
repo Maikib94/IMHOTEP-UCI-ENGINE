@@ -21,7 +21,12 @@
 //    SpO₂  — curva de Severinghaus (disociación Hb)
 // ═══════════════════════════════════════════════════════════════════════════════
 
-import { usePatientStore } from '../store/usePatientStore';
+import {
+  usePatientStore,
+  computeDeviceFiO2,
+  computeDevicePEEP,
+  computeEffectiveFiO2AndMechanics,
+} from '../store/usePatientStore';
 import { usePathologyStore } from '../store/usePathologyStore';
 import { usePharmacologyStore } from '../store/usePharmacologyStore';
 import {
@@ -30,6 +35,17 @@ import {
   type SV800Settings,
   type VentMode,
 } from './VentilatorSV800Engine';
+
+import type { VentilatorMode } from '../store/usePatientStore';
+
+// ─── Ring buffer de ondas (Fase 3) ──────────────────────────────────────────
+
+export interface WaveformSample {
+  t: number;        // tiempo de simulación (s)
+  pressure: number; // cmH₂O
+  flow: number;     // L/min (+inspiración / -espiración)
+  volume: number;   // mL
+}
 
 // ─── Interfaces preservadas para no romper consumidores existentes ──────────
 
@@ -62,8 +78,14 @@ export interface LungMechanics {
 //  interno del propio engine (SV800Settings.mode). Mientras la UI no migre,
 //  exponemos este mapeo como función pura.
 //
-function mapLegacyMode(m: 'VC-AC' | 'PS'): VentMode {
-  return m === 'PS' ? 'PSV' : 'VCV';
+function mapLegacyMode(m: VentilatorMode): VentMode {
+  switch (m) {
+    case 'PC-AC': return 'PCV';
+    case 'PSV':   return 'PSV';
+    case 'CPAP':  return 'PSV';
+    case 'SIMV':  return 'VCV';
+    default:      return 'VCV';
+  }
 }
 
 // ─── CONSTANTES DE INTERCAMBIO GASEOSO ──────────────────────────────────────
@@ -98,14 +120,26 @@ export class RespiratoryEngine {
     amvWeightKg: 70,
   };
 
+  // ── Ring buffer (Fase 3) ────────────────────────────────────────────────────
+  private ringBuffer: WaveformSample[] = [];
+  private readonly RING_CAPACITY = 500;
+  private readonly SAMPLE_RATE = 50;   // muestras por segundo de simulación
+  private cyclePhase = 0;              // fracción 0–1 dentro del ciclo respiratorio
+  private absoluteTime = 0;           // tiempo acumulado de simulación (s)
+
   private constructor() {}
   public static getInstance(): RespiratoryEngine {
     if (!RespiratoryEngine.instance) RespiratoryEngine.instance = new RespiratoryEngine();
     return RespiratoryEngine.instance;
   }
 
+  public getWaveform(): ReadonlyArray<WaveformSample> { return this.ringBuffer; }
+
   public reset(): void {
     this.sv800.reset(this.sv800Settings.peep);
+    this.ringBuffer = [];
+    this.cyclePhase = 0;
+    this.absoluteTime = 0;
   }
 
   /** API nueva — permite al componente SV800 activar modos avanzados. */
@@ -155,26 +189,53 @@ export class RespiratoryEngine {
   public update(dt: number): void {
     const pat = usePatientStore.getState();
     const { vitals, ventilator, bloodVolume } = pat;
+    const isArmConnected = pat.isVentilatorConnected;
     const path = usePathologyStore.getState();
     const pharm = usePharmacologyStore.getState();
 
-    // ── 1. Sincronizar sv800Settings con store legacy ────────────────────────
-    // Si la UI legacy cambia PEEP/VT/FiO₂, propagamos al SV800.
-    this.sv800Settings.fio2 = ventilator.fio2;
-    this.sv800Settings.peep = ventilator.peep;
+    // ── 1. Sincronizar sv800Settings con store ───────────────────────────────
+    const device = pat.respiratoryDevice;
+
+    // Fase 4: usar computeEffectiveFiO2AndMechanics para o2Support extendido.
+    // Si o2Support es INVASIVE_ARM o el campo no está inicializado, cae al
+    // comportamiento legacy (isArmConnected / computeDeviceFiO2).
+    const o2Support = ventilator.o2Support ?? 'INVASIVE_ARM';
+    const useNewO2  = o2Support !== 'INVASIVE_ARM';
+
+    let effectiveFiO2: number;
+    let devicePeep:    number;
+    let mechCFactor = 1.0;
+
+    if (useNewO2) {
+      const o2 = computeEffectiveFiO2AndMechanics(o2Support, ventilator, device);
+      effectiveFiO2 = o2.fio2Eff;
+      devicePeep    = o2.peepEff;
+      mechCFactor   = o2.cFactor;
+    } else {
+      effectiveFiO2 = isArmConnected ? ventilator.fio2 : computeDeviceFiO2(device);
+      devicePeep    = isArmConnected ? 0 : computeDevicePEEP(device);
+    }
+
+    this.sv800Settings.fio2 = effectiveFiO2;
+    this.sv800Settings.peep = isArmConnected ? ventilator.peep : devicePeep;
     this.sv800Settings.vtTarget = ventilator.vt;
     this.sv800Settings.rrSet = ventilator.setRR;
     this.sv800Settings.pSupport = ventilator.pressureSupport;
+    if (ventilator.ieRatio > 0) {
+      const tCycle = 60 / Math.max(4, ventilator.setRR);
+      this.sv800Settings.tInspSet = tCycle * ventilator.ieRatio / (1 + ventilator.ieRatio);
+    }
+    if (ventilator.pControl > 0) this.sv800Settings.pInspSet = ventilator.pControl;
 
-    // Modo — si el usuario está en modo legacy, preservamos VCV/PSV.
-    // El componente SV800 (nueva UI) sobrescribe con PRVC/AMV via setSV800().
     if (this.sv800Settings.mode !== 'PRVC' &&
         this.sv800Settings.mode !== 'AMV' &&
         this.sv800Settings.mode !== 'PCV') {
       this.sv800Settings.mode = mapLegacyMode(ventilator.mode);
     }
 
-    // ── 2. Construir mecánica del paciente desde patologías y fármacos ──────
+    // ── 2. Mecánica del paciente ─────────────────────────────────────────────
+    // ARM conectado: la máquina toma el control — ignorar NMB/sedación para
+    // el esfuerzo del paciente (VCV entrega el volumen sin importar Pmus).
     const mechanics = deriveMechanicsFromPathology({
       weightKg: vitals.weight,
       ardsActive: path.ards.isActive,
@@ -182,20 +243,17 @@ export class RespiratoryEngine {
       sepsisActive: path.sepsis.isActive,
       sepsisSeverity: path.sepsis.severity,
       hypovolemicFraction: Math.max(0, (5000 - bloodVolume) / 5000),
-      isSedated: pharm.systemicEffects.sedation > 0.5,
-      nmbaFraction: pharm.systemicEffects.nmba,
+      isSedated: isArmConnected ? false : pharm.systemicEffects.sedation > 0.5,
+      nmbaFraction: isArmConnected ? 0  : pharm.systemicEffects.nmba,
     });
 
-    // ── 3. Aplicar modificador de compliance de patologías (legacy coherence) ─
-    //      path.modifiers.complianceMultiplier ya incorpora severidad ARDS.
-    //      Usamos el menor entre ambos para no doble-contar.
     const effCrs = Math.min(
-      mechanics.crs,
-      50 * (path.modifiers.complianceMultiplier || 1),
+      mechanics.crs * mechCFactor,
+      50 * (path.modifiers.complianceMultiplier || 1) * mechCFactor,
     );
     const mechanicsEff = { ...mechanics, crs: effCrs };
 
-    // ── 4. AMV: recalcular Vt/f óptimos cada 10 s de tiempo simulado ─────────
+    // ── 3. AMV ───────────────────────────────────────────────────────────────
     if (this.sv800Settings.mode === 'AMV') {
       const rec = this.sv800.computeOtisAMV(
         this.sv800Settings.amvMinuteVentTarget,
@@ -206,24 +264,147 @@ export class RespiratoryEngine {
       this.sv800Settings.vtTarget = Math.round(rec.vtOpt);
     }
 
-    // ── 5. Avanzar motor físico ─────────────────────────────────────────────
+    // ── 4. Avanzar motor físico ──────────────────────────────────────────────
     this.sv800.update(dt, this.sv800Settings, mechanicsEff);
 
-    // ── 6. Publicar vitales desde la última respiración completa ─────────────
+    // ── 4b. Ring buffer analítico (Fase 3) — 50 muestras/s sim ──────────────
+    this.computeAnalyticalSamples(dt, mechanicsEff.crs, mechanicsEff.raw, ventilator, isArmConnected);
+
+    // ── 5. Publicar vitales ──────────────────────────────────────────────────
     const breath = this.sv800.getLastBreath();
-    if (breath.breathId > 0) {
-      pat.updateVitals({
-        pplat: Math.round(breath.pPlat * 10) / 10,
-        ppico: Math.round(breath.pPeak * 10) / 10,
-        meanAirwayPressure: Math.round(breath.pMean * 10) / 10,
-        deltaP: Math.round(breath.drivingPressure * 10) / 10,
-        mechanicalPower: Math.round(breath.mechPowerJmin * 10) / 10,
-        respiratoryRate: Math.round(60 / Math.max(0.5, breath.tCycle)),
-      });
+    const rawMV  = breath.minVol ?? 0;
+
+    if (isArmConnected) {
+      // Ventilador controla: RR = set, volúmenes garantizados
+      if (breath.breathId > 0) {
+        pat.updateVitals({
+          pplat:              Math.round(breath.pPlat * 10) / 10,
+          ppico:              Math.round(breath.pPeak * 10) / 10,
+          meanAirwayPressure: Math.round(breath.pMean * 10) / 10,
+          deltaP:             Math.round(breath.drivingPressure * 10) / 10,
+          mechanicalPower:    Math.round(breath.mechPowerJmin * 10) / 10,
+          respiratoryRate:    Math.round(60 / Math.max(0.5, breath.tCycle)),
+        });
+      }
+      this.updateGasExchange(dt, mechanicsEff.crs, rawMV);
+    } else {
+      // Sin ARM: NMB/sedación reducen drive respiratorio → apnea posible
+      const nmba      = pharm.systemicEffects.nmba;
+      const respDepr  = pharm.systemicEffects.respDepressionIdx;
+      const driveFactor = Math.max(0, 1 - nmba * 0.92 - respDepr * 0.45);
+
+      if (breath.breathId > 0) {
+        const spontRR = Math.round(
+          Math.round(60 / Math.max(0.5, breath.tCycle)) * driveFactor
+        );
+        pat.updateVitals({
+          pplat:              Math.round(breath.pPlat  * 10) / 10,
+          ppico:              Math.round(breath.pPeak  * 10) / 10,
+          meanAirwayPressure: Math.round(breath.pMean  * 10) / 10,
+          deltaP:             Math.round(breath.drivingPressure * 10) / 10,
+          mechanicalPower:    Math.round(breath.mechPowerJmin   * 10) / 10,
+          respiratoryRate:    spontRR,
+        });
+      }
+      this.updateGasExchange(dt, mechanicsEff.crs, rawMV * driveFactor);
     }
 
-    // ── 7. Intercambio gaseoso (PaO₂, PaCO₂, SpO₂) ──────────────────────────
-    this.updateGasExchange(dt, mechanicsEff.crs, breath.minVol || 0);
+    // ── 6. Publicar outputs al ventilador del store (Fase 3) ─────────────────
+    const rr = Math.max(4, ventilator.setRR);
+    pat.applyVentOutputs({
+      fio2Effective: effectiveFiO2,
+      pPeak:             breath.breathId > 0 ? Math.round(breath.pPeak * 10) / 10 : 0,
+      pPlateau:          breath.breathId > 0 ? Math.round(breath.pPlat * 10) / 10 : 0,
+      pMean:             breath.breathId > 0 ? Math.round(breath.pMean * 10) / 10 : 0,
+      autoPEEP:          breath.breathId > 0 ? Math.round((breath.autoPeep ?? 0) * 10) / 10 : 0,
+      minuteVentilation: breath.breathId > 0 ? Math.round(rawMV * 10) / 10
+                         : Math.round(ventilator.vt * rr / 1000 * 10) / 10,
+    });
+  }
+
+  // ─── RING BUFFER ANALÍTICO ────────────────────────────────────────────────
+  //
+  //  Genera muestras de P/Flow/V usando la ecuación de movimiento (Otis/Rohrer).
+  //  Fórmulas según especificación (Fase 3):
+  //
+  //  VCV (flujo cuadrado):
+  //    Flow_insp = Vt/Ti    (constante)
+  //    V(t) = Flow × t      (rampa)
+  //    P(t) = V(t)/C + R×Flow + PEEP
+  //
+  //  PCV (presión constante):
+  //    τ = R × C / 1000
+  //    Flow(t) = (Pinsp/R) × exp(-t/τ)
+  //    V(t) = Pinsp × C × (1 - exp(-t/τ))
+  //
+  private computeAnalyticalSamples(
+    dt: number,
+    crs: number,
+    raw: number,
+    ventilator: { mode: string; setRR: number; vt: number; peep: number; iTime: number;
+                  pControl: number; pressureSupport: number; flowRate: number },
+    _isArmConnected: boolean,
+  ): void {
+    const rr = Math.max(4, ventilator.setRR);
+    const T  = 60 / rr;
+    const tI = Math.max(0.2, ventilator.iTime > 0.1 ? ventilator.iTime : this.sv800Settings.tInspSet);
+    const tiFrac = Math.max(0.1, Math.min(0.85, tI / T));
+    const peep = this.sv800Settings.peep;
+    const vtMl = ventilator.vt;
+    const pInsp = this.sv800Settings.pInspSet;
+    const tau = Math.max(0.01, raw * crs / 1000);
+
+    const numSamples = Math.max(1, Math.round(dt * this.SAMPLE_RATE));
+    const sampleDt   = dt / numSamples;
+
+    for (let i = 0; i < numSamples; i++) {
+      const ph = this.cyclePhase;
+      let pressure: number, flow: number, volume: number;
+
+      if (ph < tiFrac) {
+        const t = (ph / tiFrac) * tI;
+
+        if (ventilator.mode === 'VC-AC' || ventilator.mode === 'SIMV') {
+          const flowLPS = (vtMl / 1000) / Math.max(0.01, tI);
+          flow     = flowLPS * 60;
+          volume   = flowLPS * t * 1000;
+          pressure = volume / crs + flowLPS * raw + peep;
+        } else if (ventilator.mode === 'PC-AC') {
+          const flowLPS = (pInsp / Math.max(0.5, raw)) * Math.exp(-t / tau);
+          flow     = flowLPS * 60;
+          volume   = pInsp * crs * (1 - Math.exp(-t / tau));
+          pressure = peep + pInsp;
+        } else {
+          // PSV / CPAP — sinusoide
+          const frac = ph / tiFrac;
+          const ps   = Math.max(0, ventilator.pressureSupport);
+          const flowLPS = (Math.PI * vtMl / 1000 / Math.max(0.01, tI)) * Math.sin(Math.PI * frac);
+          flow     = flowLPS * 60;
+          volume   = vtMl * (1 - Math.cos(Math.PI * frac)) / 2;
+          pressure = peep + ps * Math.sin(Math.PI * frac);
+        }
+      } else {
+        const tExp = (ph - tiFrac) * T;
+        const vtAch = ventilator.mode === 'PC-AC'
+          ? pInsp * crs * (1 - Math.exp(-tI / tau))
+          : vtMl;
+        const flowLPS = -(vtAch / 1000 / tau) * Math.exp(-tExp / tau);
+        volume   = Math.max(0, vtAch * Math.exp(-tExp / tau));
+        pressure = Math.max(peep - 0.5, volume / crs + flowLPS * raw + peep);
+        flow     = flowLPS * 60;
+      }
+
+      this.absoluteTime += sampleDt;
+      if (this.ringBuffer.length >= this.RING_CAPACITY) this.ringBuffer.shift();
+      this.ringBuffer.push({
+        t: this.absoluteTime,
+        pressure: Math.round(pressure * 10) / 10,
+        flow:     Math.round(flow * 10) / 10,
+        volume:   Math.round(volume * 10) / 10,
+      });
+
+      this.cyclePhase = (this.cyclePhase + sampleDt / T) % 1;
+    }
   }
 
   // ─── INTERCAMBIO GASEOSO ─────────────────────────────────────────────────
@@ -244,7 +425,9 @@ export class RespiratoryEngine {
     const v = pat.vitals;
     const path = usePathologyStore.getState();
     const shunt = path.modifiers.lungShuntFraction;
-    const fio2 = pat.ventilator.fio2;
+    const fio2 = pat.isVentilatorConnected
+      ? pat.ventilator.fio2
+      : computeDeviceFiO2(pat.respiratoryDevice);
 
     // PAO₂ (alveolar) — gas alveolar
     const pao2Alv = fio2 * (PB - PH2O) - v.paCO2 / RQ;

@@ -5,6 +5,7 @@
 // → RespiratoryEngine → AcidBaseEngine → RenalEngine → NeuroEngine → LabEngine
 
 import { useTimeStore } from '../store/useTimeStore';
+import { usePatientStore } from '../store/usePatientStore';
 import { MicrobiologyEngine } from './MicrobiologyEngine';
 import { PathologyEngine } from './PathologyEngine';
 import { PharmacologyEngine } from './PharmacologyEngine';
@@ -14,6 +15,7 @@ import { AcidBaseEngine } from './AcidBaseEngine';
 import { RenalEngine } from './RenalEngine';
 import { NeuroEngine } from './NeuroEngine';
 import { LabEngine } from './LabEngine';
+import { PrognosisEngine } from './PrognosisEngine';
 
 const TICKS_PER_REAL_SECOND = 240;
 const DT_BASE = 1.0;
@@ -69,16 +71,21 @@ export class CronosEngine {
   };
 
   private tick(dt: number): void {
+    if (usePatientStore.getState().ventilator.isPaused) return;
+
     useTimeStore.getState().advanceTick(dt);
 
+    // Orden clínico: Resp antes que Cardio para que pMean esté disponible
+    // en el mismo tick (Fase 5 — Guyton / ARDSnet coupling)
     MicrobiologyEngine.getInstance().update(dt);
     PathologyEngine.getInstance().update(dt);
     PharmacologyEngine.getInstance().update(dt);
-    CardiovascularEngine.getInstance().updateHemodynamics(dt);
-    RespiratoryEngine.getInstance().update(dt);
+    RespiratoryEngine.getInstance().update(dt);          // ← escribe pMean
+    CardiovascularEngine.getInstance().updateHemodynamics(dt); // ← lee pMean
     AcidBaseEngine.getInstance().update(dt);
     RenalEngine.getInstance().update(dt);
     NeuroEngine.getInstance().update(dt);
     LabEngine.getInstance().update();
+    PrognosisEngine.getInstance().update(dt);
   }
 }
