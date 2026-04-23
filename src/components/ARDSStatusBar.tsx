@@ -1,50 +1,74 @@
-import React from 'react';
+// src/components/ARDSStatusBar.tsx
+// Barra SDRA compacta (28 px). Condicional: retorna null si ardsActive=false.
+// Lee del store directamente — no necesita props de severidad externos.
+// Histéresis en RespiratoryEngine (P/F activa ≤300, desactiva >320).
+// Ref: ARDS Definition Task Force JAMA 2012 (Berlin); Ferguson ICM 2012.
 
-interface Props {
-  severity: 'none' | 'mild' | 'moderate' | 'severe';
-  pao2Fio2Ratio?: number; // Lo hacemos opcional para que no explote si no llega
+import React from 'react';
+import { usePatientStore } from '../store/usePatientStore';
+
+// Props opcionales para override externo (testeo/storybook)
+export interface ARDSStatusBarProps {
+  overrideSeverity?: 'NONE' | 'MILD' | 'MODERATE' | 'SEVERE';
 }
 
-export const ARDSStatusBar: React.FC<Props> = ({ severity, pao2Fio2Ratio = 400 }) => {
-  const severityConfig = {
-    none: { color: 'bg-green-500', label: 'NORMAL' },
-    mild: { color: 'bg-yellow-500', label: 'LEVE' },
-    moderate: { color: 'bg-orange-500', label: 'MODERADO' },
-    severe: { color: 'bg-red-600', label: 'SEVERO' },
-  };
+const SEVERITY_CONFIG = {
+  NONE:     { label: 'NORMAL',   border: '#334155', bg: '#1e293b', text: '#94a3b8', bar: '#475569' },
+  MILD:     { label: 'LEVE',     border: '#713f12', bg: '#1c1003', text: '#fbbf24', bar: '#d97706' },
+  MODERATE: { label: 'MODERADO', border: '#9a3412', bg: '#1c0a03', text: '#fb923c', bar: '#ea580c' },
+  SEVERE:   { label: 'SEVERO',   border: '#7f1d1d', bg: '#1c0303', text: '#f87171', bar: '#dc2626' },
+} as const;
 
-  const { color: barColor, label: severityLabel } = severityConfig[severity] || severityConfig.none;
+export const ARDSStatusBar: React.FC<ARDSStatusBarProps> = ({ overrideSeverity }) => {
+  const ardsActive   = usePatientStore(s => s.vitals.ardsActive);
+  const ardsSeverity = usePatientStore(s => s.vitals.ardsSeverityLevel);
+  const pfRatio      = usePatientStore(s => s.vitals.pfRatio);
+  const peep         = usePatientStore(s => s.ventilator.peep);
+  const fio2Pct      = usePatientStore(s => Math.round(s.ventilator.fio2Effective * 100));
 
-  // Defensa extra: nos aseguramos de que sea un número válido antes de hacer matemáticas
-  const safeRatio = typeof pao2Fio2Ratio === 'number' && !isNaN(pao2Fio2Ratio) ? pao2Fio2Ratio : 400;
-  const percentage = Math.min(100, Math.max(0, (safeRatio / 500) * 100));
-  const widthPct   = `${percentage.toFixed(1)}%`;
+  const severity = overrideSeverity ?? ardsSeverity;
+  const active   = overrideSeverity ? overrideSeverity !== 'NONE' : ardsActive;
+
+  if (!active) return null;
+
+  const cfg = SEVERITY_CONFIG[severity];
+  // Barra P/F inversa: 0=400+ (verde), 100=0 (rojo) → se invierta visualmente
+  const pfPct = Math.min(100, Math.max(0, (pfRatio / 400) * 100));
 
   return (
-    <div className="bg-gray-800 p-4 rounded-lg shadow-md border border-gray-700 w-full font-sans">
-      <div className="flex justify-between items-center mb-3">
-        <h3 className="text-gray-300 font-bold uppercase tracking-wider text-sm">Estado SDRA (Kirby)</h3>
-        <span className={`px-2 py-1 rounded text-xs font-bold text-white shadow-sm ${barColor}`}>
-          {severityLabel}
-        </span>
+    <div
+      role="status"
+      aria-label={`SDRA ${cfg.label} — P/F ${pfRatio}`}
+      style={{
+        height: 28, flexShrink: 0, display: 'flex', alignItems: 'center',
+        gap: 10, padding: '0 12px',
+        background: cfg.bg,
+        borderBottom: `1px solid ${cfg.border}`,
+        borderTop: `1px solid ${cfg.border}`,
+      }}
+    >
+      <span style={{
+        fontSize: '0.48rem', fontWeight: 900, letterSpacing: '0.14em',
+        color: cfg.text, fontFamily: 'monospace', whiteSpace: 'nowrap',
+      }}>
+        SDRA · {cfg.label}
+      </span>
+
+      <div style={{ flex: 1, height: 4, background: 'rgba(255,255,255,0.06)', borderRadius: 2, overflow: 'hidden', minWidth: 40 }}>
+        <div style={{
+          height: '100%', width: `${pfPct.toFixed(1)}%`,
+          background: cfg.bar, borderRadius: 2,
+          transition: 'width 1s ease',
+        }} />
       </div>
 
-      <div className="w-full bg-gray-900 rounded-full h-3 relative overflow-hidden border border-gray-600">
-        <div
-          ref={el => { if (el) el.style.width = widthPct; }}
-          className={`h-full rounded-full transition-all duration-1000 ease-in-out ${barColor}`}
-          role="progressbar"
-          aria-valuenow={Math.round(safeRatio)}
-          aria-valuemin={0}
-          aria-valuemax={500}
-          aria-label="Relación PaO2/FiO2"
-        />
-      </div>
-
-      <div className="mt-2 text-right">
-        <span className="text-gray-400 text-xs font-mono">PaO2/FiO2: </span>
-        <span className="text-white font-bold font-mono text-sm">{safeRatio.toFixed(0)}</span>
-      </div>
+      <span style={{ fontSize: '0.46rem', fontFamily: 'monospace', color: cfg.text, whiteSpace: 'nowrap' }}>
+        P/F <strong>{pfRatio}</strong>
+        <span style={{ color: 'rgba(255,255,255,0.3)', margin: '0 4px' }}>·</span>
+        PEEP <strong>{peep}</strong>
+        <span style={{ color: 'rgba(255,255,255,0.3)', margin: '0 4px' }}>·</span>
+        FiO₂ <strong>{fio2Pct}%</strong>
+      </span>
     </div>
   );
 };

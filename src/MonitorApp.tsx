@@ -2,7 +2,6 @@
 import React, { useEffect, useState } from 'react';
 import { usePatientStore } from './store/usePatientStore';
 import { useTimeStore } from './store/useTimeStore';
-import { usePathologyStore } from './store/usePathologyStore';
 import { usePrognosisStore } from './store/usePrognosisStore';
 import { CronosEngine } from './core/CronosEngine';
 import LabPanel from './components/LabPanel';
@@ -30,21 +29,10 @@ var MonitorApp: React.FC = function () {
   var isRun = useTimeStore(s => s.isRunning);
   var spd = useTimeStore(s => s.speedMultiplier);
   var wt = usePatientStore(s => s.vitals.weight);
-  var ards            = usePathologyStore(s => s.ards);
-  var paO2            = usePatientStore(s => s.vitals.paO2);
-  var fio2            = usePatientStore(s => s.ventilator.fio2);
   var isVentConnected = usePatientStore(s => s.isVentilatorConnected);
   var progOutcome     = usePrognosisStore(s => s.outcome);
   var progSofa        = usePrognosisStore(s => s.sofaScore);
   var progActive      = usePrognosisStore(s => s.isActive);
-
-  var ardsSeverity: 'none' | 'mild' | 'moderate' | 'severe' = 'none';
-  if (ards.isActive) {
-    if (ards.severity >= 0.75) ardsSeverity = 'severe';
-    else if (ards.severity >= 0.45) ardsSeverity = 'moderate';
-    else ardsSeverity = 'mild';
-  }
-  var pf = fio2 > 0 ? Math.round(paO2 / fio2) : 400;
 
   var [showLab, setShowLab] = useState(false);
   var [showVent, setShowVent] = useState(false);
@@ -97,7 +85,7 @@ var MonitorApp: React.FC = function () {
         </div>
       </div>
 
-      <ARDSStatusBar severity={ardsSeverity} pao2Fio2Ratio={pf} />
+      <ARDSStatusBar />
 
       {/* BODY: grid principal + panel ARM (cuando está activo) */}
       <div className="flex-1 flex flex-col overflow-hidden min-h-0">

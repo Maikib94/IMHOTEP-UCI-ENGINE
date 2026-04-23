@@ -131,6 +131,11 @@ export class RespiratoryEngine {
   private maneuverElapsed = 0;        // s transcurridos desde inicio de maniobra
   private activatedManeuver: 'NONE' | 'INSPIRATORY' | 'EXPIRATORY' = 'NONE';
 
+  // ── ARDS derivado Berlin 2012 (Fase 2 v0.19) ─────────────────────────────────
+  // Histéresis: activa con P/F ≤ 300 + PEEP ≥ 5; desactiva al superar P/F > 320.
+  // Ref: ARDS Definition Task Force (Ferguson) JAMA 2012.
+  private ardsHysteresisActive = false;
+
   private constructor() {}
   public static getInstance(): RespiratoryEngine {
     if (!RespiratoryEngine.instance) RespiratoryEngine.instance = new RespiratoryEngine();
@@ -380,6 +385,30 @@ export class RespiratoryEngine {
       minuteVentilation: breath.breathId > 0 ? Math.round(rawMV * 10) / 10
                          : Math.round(ventilator.vt * rr / 1000 * 10) / 10,
     });
+
+    // ── 7. Derivados ARDS Berlin 2012 (Fase 2 v0.19) ────────────────────────
+    //   Criterio numérico: P/F ≤ 300 con PEEP ≥ 5 cmH₂O
+    //   Histéresis: desactiva al superar P/F > 320 (evita flicker en el umbral)
+    //   Ref: ARDS Definition Task Force JAMA 2012; Ferguson Intensive Care Med 2012
+    const pfRatio = effectiveFiO2 > 0
+      ? Math.round(vitals.paO2 / effectiveFiO2)
+      : 999;
+    const peep = ventilator.peep;
+
+    if (!this.ardsHysteresisActive) {
+      if (pfRatio <= 300 && peep >= 5) this.ardsHysteresisActive = true;
+    } else {
+      if (pfRatio > 320) this.ardsHysteresisActive = false;
+    }
+
+    let ardsSeverityLevel: 'NONE' | 'MILD' | 'MODERATE' | 'SEVERE' = 'NONE';
+    if (this.ardsHysteresisActive) {
+      if (pfRatio <= 100)      ardsSeverityLevel = 'SEVERE';
+      else if (pfRatio <= 200) ardsSeverityLevel = 'MODERATE';
+      else                     ardsSeverityLevel = 'MILD';
+    }
+
+    pat.updateVitals({ pfRatio, ardsActive: this.ardsHysteresisActive, ardsSeverityLevel });
   }
 
   // ─── RING BUFFER ANALÍTICO ────────────────────────────────────────────────
