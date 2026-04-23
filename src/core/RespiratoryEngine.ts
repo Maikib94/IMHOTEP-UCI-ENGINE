@@ -127,6 +127,10 @@ export class RespiratoryEngine {
   private cyclePhase = 0;              // fracción 0–1 dentro del ciclo respiratorio
   private absoluteTime = 0;           // tiempo acumulado de simulación (s)
 
+  // ── Maniobras de pausa (Fase 3) ─────────────────────────────────────────────
+  private maneuverElapsed = 0;        // s transcurridos desde inicio de maniobra
+  private activatedManeuver: 'NONE' | 'INSPIRATORY' | 'EXPIRATORY' = 'NONE';
+
   private constructor() {}
   public static getInstance(): RespiratoryEngine {
     if (!RespiratoryEngine.instance) RespiratoryEngine.instance = new RespiratoryEngine();
@@ -189,6 +193,62 @@ export class RespiratoryEngine {
   public update(dt: number): void {
     const pat = usePatientStore.getState();
     const { vitals, ventilator, bloodVolume } = pat;
+
+    // ── Maniobras de pausa del operador (Fase 3) ─────────────────────────────
+    // Duraciones: INSPIRATORY = 2 s, EXPIRATORY = 3 s (spec)
+    const requestedManeuver = ventilator.pauseManeuver;
+    if (requestedManeuver !== 'NONE') {
+      // Primer tick de la maniobra: registrar y arrancar timer
+      if (this.activatedManeuver === 'NONE') {
+        this.activatedManeuver = requestedManeuver;
+        this.maneuverElapsed = 0;
+      }
+      this.maneuverElapsed += dt;
+      const duration = this.activatedManeuver === 'INSPIRATORY' ? 2 : 3;
+
+      if (this.maneuverElapsed < duration) {
+        // Durante la maniobra: no generar nuevas muestras, mantener curva congelada
+        return;
+      }
+
+      // Maniobra completada: medir y publicar
+      if (this.activatedManeuver === 'INSPIRATORY') {
+        // Pplat medido = presión elástica pura (flujo=0): Vt/C + PEEP
+        const crs  = Math.max(10, ventilator.vt / Math.max(1, vitals.pplat - ventilator.peep));
+        const pplat = Math.round((ventilator.vt / crs + ventilator.peep) * 10) / 10;
+        pat.updateVitals({ pplat });
+      } else {
+        // autoPEEP medido al final de la espiración con válvulas cerradas
+        const rr = Math.max(4, ventilator.setRR);
+        const T  = 60 / rr;
+        const tI = Math.max(0.2, ventilator.iTime);
+        const tE = Math.max(0.1, T - tI);
+        const fl_s = Math.max(0.05, ventilator.flowRate / 60);
+        const R  = Math.max(2, (vitals.ppico - vitals.pplat) / fl_s);
+        const C  = Math.max(10, ventilator.vt / Math.max(1, vitals.pplat - ventilator.peep));
+        const tau = Math.max(0.05, R * C / 1000);
+        const autoPEEP = Math.round(Math.max(0, ventilator.vt * Math.exp(-tE / tau) / C) * 10) / 10;
+        pat.applyVentOutputs({
+          fio2Effective: ventilator.fio2Effective,
+          pPeak: ventilator.pPeak,
+          pPlateau: ventilator.pPlateau,
+          pMean: ventilator.pMean,
+          minuteVentilation: ventilator.minuteVentilation,
+          autoPEEP,
+        });
+      }
+
+      // Resetear maniobra
+      this.activatedManeuver = 'NONE';
+      this.maneuverElapsed   = 0;
+      pat.triggerPauseManeuver('NONE');
+      return;
+    }
+    // Sin maniobra activa — resetear estado interno
+    if (this.activatedManeuver !== 'NONE') {
+      this.activatedManeuver = 'NONE';
+      this.maneuverElapsed   = 0;
+    }
     const isArmConnected = pat.isVentilatorConnected;
     const path = usePathologyStore.getState();
     const pharm = usePharmacologyStore.getState();
