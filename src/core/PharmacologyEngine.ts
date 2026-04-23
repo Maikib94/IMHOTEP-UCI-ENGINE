@@ -36,6 +36,16 @@ export const DRUG_MAX_DOSES: Record<DrugId, number> = {
   cisatracurium:   0.3,    // mg/kg/h
   rocuronium:      0.6,    // mg/kg/h
   pancuronium:     0.1,    // mg/kg/h
+  // Antiarrítmicos (Fase 4)
+  // Amiodarona: dosis ref 60 mg/h ≡ 1 mg/min (máx infusión UCI).
+  //   Bolo 150 mg → cpRatio = 150/(60 × 1.5h) ≈ 1.67 → efecto Hill visible.
+  //   Ref: AHA ACLS 2023; Goodman & Gilman 13ª cap. Antiarrítmicos.
+  amiodarone:     60.0,    // mg/h
+  // Digoxina: dosis ref 0.05 mg/h (ultra-baja → alta sensibilidad para simulación).
+  //   Bolo 0.25 mg → cpRatio = 0.25/(0.05 × 2h) = 2.5 → efecto Hill claro.
+  //   Ventana terapéutica: cpRatio ≈ 0.67-1.67 (0.8-2.0 ng/mL equiv).
+  //   Ref: Goodman & Gilman 13ª cap. Glucósidos cardíacos; KDIGO 2024.
+  digoxin:         0.05,   // mg/h
 };
 
 export class PharmacologyEngine {

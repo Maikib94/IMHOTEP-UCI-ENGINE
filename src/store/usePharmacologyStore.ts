@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-export type DrugId = 
+export type DrugId =
   // Vasopresores
   'noradrenaline' | 'adrenaline' | 'vasopressin' | 'methylene_blue' |
   // Inotrópicos
@@ -10,7 +10,9 @@ export type DrugId =
   // Analgésicos
   'morphine' | 'fentanyl' | 'remifentanil' |
   // BNM
-  'atracurium' | 'cisatracurium' | 'rocuronium' | 'pancuronium';
+  'atracurium' | 'cisatracurium' | 'rocuronium' | 'pancuronium' |
+  // Antiarrítmicos (Fase 4)
+  'amiodarone' | 'digoxin';
 
 // ─── PK Definition ────────────────────────────────────────────────────────────
 export interface DrugPKDef {
@@ -287,6 +289,32 @@ export const DRUG_CATALOG: Record<DrugId, DrugCatalogEntry> = {
                             // Ref: Miller Anesthesia 9ª Ed. Cap.28 — pancuronium vagolysis
       hrDirect: 12,         // taquicardia directa por vagólisis
     },
+  },
+
+  // ── ANTIARRÍTMICOS (Fase 4) ──────────────────────────────────────────────────
+  //
+  // PK: monocompartimental normalizado. cpRatio = 1.0 ≡ concentración terapéutica.
+  // halfLifeMin representa el t½ efectivo del efecto cardíaco agudo (≠ t½ plasmático
+  // terminal, que para amiodarona es 25-50 días — clínicamente no relevante en UCI
+  // de corta duración). Ref: Goodman & Gilman 13ª, cap. Antiarrhythmics.
+  //
+  // DRUG_MAX_DOSES se setea de modo que:
+  //   bolo 150mg amiodarona → cpRatio ≈ 1.0-2.5 (efecto terapéutico visible)
+  //   bolo 0.25mg digoxina  → cpRatio ≈ 1.0-2.5 (efecto visible, ventana estrecha)
+  // La lógica cronotropa Hill se implementa en CardiovascularEngine (no en pd.hrDirect),
+  // porque requiere el modelo de sinergia y curva sigmoide específica.
+  //
+  amiodarone: {
+    id: 'amiodarone', halfLifeMin: 90, vdLkg: 60, inputUnit: 'mg/h',
+    pd: { ...ZERO_PD },
+    // Efecto cronotropo vía Hill en CardiovascularEngine.computeChronotropicEffect()
+    // Vaughan-Williams clase III (bloqueo K⁺) + efectos I, II, IV (Goodman&Gilman 13ª)
+  },
+  digoxin: {
+    id: 'digoxin', halfLifeMin: 120, vdLkg: 7, inputUnit: 'mg/h',
+    pd: { ...ZERO_PD },
+    // Inhibidor Na⁺/K⁺-ATPasa → potenciación vagal → enlentece conducción AV
+    // Efecto cronotropo vía Hill en CardiovascularEngine.computeChronotropicEffect()
   },
 };
 

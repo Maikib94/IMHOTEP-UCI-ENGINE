@@ -62,6 +62,25 @@ const HEMO_PEEP_SYNERGY_MAX   = 0.60;   // 0.50 → 0.60
 const PEEP_VR_REDUCTION_PER_CMH2O = 0.025;   // fracción de SV por cmH₂O exceso
 const PEEP_VR_THRESHOLD           = 5;        // cmH₂O — por debajo sin efecto
 
+// ─── ANTIARRÍTMICOS — constantes PD cronotropas (Fase 4) ─────────────────────
+// Amiodarona (Vaughan-Williams III + efectos I,II,IV):
+//   - Reducción máxima de HR: 20% (bloqueo β + Ca²⁺ nodo AV)
+//   - Hill n=2.0 → efecto gradual, sin bradicardia brusca a dosis bajas
+//   - Ref: Goodman & Gilman 13ª cap. 30; Kowey JACC 2009
+// Digoxina (inhibidor Na⁺/K⁺-ATPasa, potenciación vagal):
+//   - Reducción máxima de HR: 15% (conducción AV enlentecida)
+//   - Hill n=1.5 → onset más suave, ventana terapéutica estrecha
+//   - Ref: Goodman & Gilman 13ª cap. 28; Gheorghiade EHJ 2010
+const AMIO_MAX_HR_REDUCTION = 0.20;
+const AMIO_HILL_N           = 2.0;
+const DIG_MAX_HR_REDUCTION  = 0.15;
+const DIG_HILL_N            = 1.5;
+// Sinergia: amio inhibe P-glicoproteína → ↑ niveles digoxina ~50-100%
+//   Ref: Nademanee AmHeartJ 1984; Hohnloser ClinPharmacol 1987
+const AMIO_DIG_SYNERGY_COEFF = 0.30;
+// Techo de reducción total para evitar bradicardia extrema por drogas solas
+const CHRONO_REDUCTION_CAP   = 0.40;
+
 // ─── ACP / RV dysfunction (Lanspa Chest 2020; Vallabhajosyula Chest 2021) ─
 const ACP_SV_PENALTY           = 0.15;   // 15% adicional si ACP confirmado
 const ACP_HR_BONUS             = 18;     // bpm compensación taquicárdica
@@ -239,13 +258,18 @@ export class CardiovascularEngine {
       + hypoxicDriveHR
       + corPulmonaleHrBonus;
 
+    // Efecto cronotropo negativo de antiarrítmicos (Fase 4)
+    // Aplicado multiplicativamente sobre targetHR (no sobre la acumulación de ruido)
+    const chronoFactor = this.computeChronotropicEffect();
+    const targetHRAdjusted = targetHR * chronoFactor;
+
     this.noiseTimer += dt;
     let newHR = v.heartRate;
 
     if (this.noiseTimer >= NOISE_INT) {
       this.noiseTimer = 0;
       this.pendingNoise = Math.random() * 2 - 1;
-      const drift = (targetHR - v.heartRate) * HR_HOMEO;
+      const drift = (targetHRAdjusted - v.heartRate) * HR_HOMEO;
       newHR = Math.round(
         Math.max(HR_MIN, Math.min(HR_MAX, v.heartRate + this.pendingNoise + drift))
       );
@@ -314,6 +338,45 @@ export class CardiovascularEngine {
       plethAmplitude: Math.round(pleth * 100) / 100,
       ...this.computeTemperature(v.temperature, vol, pd.thermoDepression, dt),
     });
+  }
+
+  // ─── ANTIARRÍTMICOS — Respuesta cronotropa sigmoide (Fase 4) ─────────────────
+  //
+  //  hillResponse(cRel, eMax, n):
+  //    cRel = 0 → efecto ≈ 0
+  //    cRel = 1 → efecto ≈ 0.5 × eMax   (EC50 = concentración terapéutica)
+  //    cRel >> 1 → efecto → eMax         (saturación)
+  //
+  private hillResponse(cRel: number, eMax: number, n: number): number {
+    const c = Math.max(0, cRel);
+    return eMax * (Math.pow(c, n) / (1 + Math.pow(c, n)));
+  }
+
+  //  computeChronotropicEffect():
+  //    Lee plasmaConcentrations del store farmacológico.
+  //    cpRatio[amiodarone|digoxin] ≡ concentración normalizada:
+  //      1.0 ≡ nivel terapéutico (amio: 1.5 mg/L, dig: 1.2 ng/mL equiv).
+  //    Retorna factor multiplicador sobre HR (1.0 = sin cambio, < 1.0 = ↓HR).
+  //
+  private computeChronotropicEffect(): number {
+    const cp = usePharmacologyStore.getState().plasmaConcentrations;
+    const amioRel = cp['amiodarone'] ?? 0;
+    const digRel  = cp['digoxin']   ?? 0;
+
+    const amioEffect = this.hillResponse(amioRel, AMIO_MAX_HR_REDUCTION, AMIO_HILL_N);
+    const digEffect  = this.hillResponse(digRel,  DIG_MAX_HR_REDUCTION,  DIG_HILL_N);
+
+    // Sinergia amiodarona-digoxina: inhib. P-glicoproteína → ↑ niveles digoxina
+    // Ref: Nademanee AmHeartJ 1984; Hohnloser ClinPharmacol 1987
+    const synergy = 1 + AMIO_DIG_SYNERGY_COEFF
+      * Math.min(1, amioRel)
+      * Math.min(1, digRel);
+
+    const totalReduction = Math.min(
+      CHRONO_REDUCTION_CAP,
+      amioEffect + digEffect * synergy,
+    );
+    return 1 - totalReduction;
   }
 
   // ─── TEMPERATURA ─────────────────────────────────────────────────────────
