@@ -110,7 +110,11 @@ export interface Vitals {
   deltaDelta: number;
   weight: number;
   temperature: number;   // °C — 36.0-37.5 normal (SATI/Cárdenas)
-  creatinine: number;   // mg/dL — creatinina sérica (normal 0.7-1.2)
+  creatinine: number;    // mg/dL — creatinina sérica (normal 0.7-1.2)
+  // ARDS derivados (Berlin 2012) — publicados por RespiratoryEngine cada tick
+  pfRatio: number;       // paO2 / fio2Effective (mmHg)
+  ardsActive: boolean;   // pfRatio ≤ 300 con PEEP ≥ 5 (con histéresis: desactiva > 320)
+  ardsSeverityLevel: 'NONE' | 'MILD' | 'MODERATE' | 'SEVERE'; // clasificación Berlin
 }
 
 export type VentilatorMode = 'VC-AC' | 'PC-AC' | 'PSV' | 'SIMV' | 'CPAP';
@@ -322,6 +326,9 @@ const INITIAL_VITALS: Vitals = {
   weight: 70,
   temperature: 37.0,
   creatinine: 1.0,
+  pfRatio: 462,          // paO2 97 / fio2 0.21 ≈ 462 (paciente sano, no cumple criterio ARDS)
+  ardsActive: false,
+  ardsSeverityLevel: 'NONE',
 };
 
 const BV_NORMAL = 5000;
@@ -385,9 +392,26 @@ const INITIAL_RESP_DEVICE: RespiratoryDevice = {
   hfncFiO2: 0.60,
 };
 
+// ─── UI persistent state (acordeón) ─────────────────────────────────────────
+const ACCORDION_DEFAULTS: Record<string, boolean> = {
+  'drugs-vasopressors':    true,
+  'drugs-inotropes':       false,
+  'drugs-antiarrhythmics': false,
+  'drugs-sedation':        false,
+  'drugs-analgesia':       false,
+  'drugs-bnm':             false,
+  'clinical-neuro':        false,
+  'infecto-lab':           false,
+  'arm-quick':             true,
+};
+
 interface PatientState {
   vitals: Vitals;
   bloodVolume: number;
+
+  // UI
+  accordionExpanded: Record<string, boolean>;
+  setAccordionExpanded: (id: string, expanded: boolean) => void;
   hemorrhageRate: number;
   redBloodCellMass: number;
   crystalloidAccumulated: number;
@@ -454,6 +478,9 @@ interface PatientState {
 
 export const usePatientStore = create<PatientState>((set) => ({
   vitals: { ...INITIAL_VITALS },
+  accordionExpanded: { ...ACCORDION_DEFAULTS },
+  setAccordionExpanded: (id, expanded) =>
+    set(s => ({ accordionExpanded: { ...s.accordionExpanded, [id]: expanded } })),
   bloodVolume: BV_NORMAL,
   hemorrhageRate: 0,
   redBloodCellMass: RBC_MASS_NORMAL,
