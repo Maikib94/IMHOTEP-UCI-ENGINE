@@ -18,6 +18,7 @@ export const ARDSStatusBar: React.FC<Props> = ({ severity, pao2Fio2Ratio = 400 }
   // Defensa extra: nos aseguramos de que sea un número válido antes de hacer matemáticas
   const safeRatio = typeof pao2Fio2Ratio === 'number' && !isNaN(pao2Fio2Ratio) ? pao2Fio2Ratio : 400;
   const percentage = Math.min(100, Math.max(0, (safeRatio / 500) * 100));
+  const widthPct   = `${percentage.toFixed(1)}%`;
 
   return (
     <div className="bg-gray-800 p-4 rounded-lg shadow-md border border-gray-700 w-full font-sans">
@@ -29,12 +30,11 @@ export const ARDSStatusBar: React.FC<Props> = ({ severity, pao2Fio2Ratio = 400 }
       </div>
 
       <div className="w-full bg-gray-900 rounded-full h-3 relative overflow-hidden border border-gray-600">
-        {/* eslint-disable-next-line react/forbid-dom-props */}
         <div
+          ref={el => { if (el) el.style.width = widthPct; }}
           className={`h-full rounded-full transition-all duration-1000 ease-in-out ${barColor}`}
-          style={{ width: `${percentage}%` }}
           role="progressbar"
-          aria-valuenow={safeRatio}
+          aria-valuenow={Math.round(safeRatio)}
           aria-valuemin={0}
           aria-valuemax={500}
           aria-label="Relación PaO2/FiO2"

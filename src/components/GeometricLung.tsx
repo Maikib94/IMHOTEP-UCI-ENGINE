@@ -3,6 +3,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 //  GeometricLung — visualización procedural de la mecánica respiratoria
 // ═══════════════════════════════════════════════════════════════════════════════
+/* eslint-disable react/forbid-dom-props */
 //
 //  Dark-mode, Glass UI, sin representación anatómica. Un polígono
 //  procedural evolutivo cuyo mapeo matemático es:

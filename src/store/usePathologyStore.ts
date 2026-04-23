@@ -210,12 +210,16 @@ export const usePathologyStore = create<PathologyState>((set) => ({
   // ── Global ────────────────────────────────────────────────────────────────
   updateModifiers: (m) => set({ modifiers: m }),
 
-  resetAllPathologies: () =>
+  resetAllPathologies: () => {
+    import('./usePatientStore').then(m => {
+      m.usePatientStore.getState().setHemorrhageRate(0);
+      m.usePatientStore.getState().resetFluidTracking();
+    });
     set({
       sepsis: { ...INITIAL_SEPSIS },
       ards: { ...INITIAL_ARDS },
-      // Llama a la acción correcta para asegurar que la tasa de sangrado también se resetee
-      ...(() => { get().deactivateHemorrhagicShock(); return {}; })(),
+      hemorrhagicShock: { ...INITIAL_HEMORRHAGIC_SHOCK },
       modifiers: { ...NEUTRAL_MODIFIERS },
-    }),
+    });
+  },
 }));

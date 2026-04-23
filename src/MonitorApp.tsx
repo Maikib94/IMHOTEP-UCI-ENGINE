@@ -1,12 +1,16 @@
+/* eslint-disable react/forbid-dom-props */
 import React, { useEffect, useState } from 'react';
 import { usePatientStore } from './store/usePatientStore';
 import { useTimeStore } from './store/useTimeStore';
+import { usePathologyStore } from './store/usePathologyStore';
+import { usePrognosisStore } from './store/usePrognosisStore';
 import { CronosEngine } from './core/CronosEngine';
 import LabPanel from './components/LabPanel';
 import WaveformMonitor from './components/WaveformMonitor';
 import { ARDSStatusBar } from './components/ARDSStatusBar';
 import VitalSignsPanel from './components/VitalSignsPanel';
 import ClinicalControlPanel from './components/ClinicalControlPanel';
+import VentilatorPanel from './components/VentilatorPanel';
 
 var MONO = "'JetBrains Mono', monospace";
 
@@ -26,8 +30,24 @@ var MonitorApp: React.FC = function () {
   var isRun = useTimeStore(s => s.isRunning);
   var spd = useTimeStore(s => s.speedMultiplier);
   var wt = usePatientStore(s => s.vitals.weight);
+  var ards            = usePathologyStore(s => s.ards);
+  var paO2            = usePatientStore(s => s.vitals.paO2);
+  var fio2            = usePatientStore(s => s.ventilator.fio2);
+  var isVentConnected = usePatientStore(s => s.isVentilatorConnected);
+  var progOutcome     = usePrognosisStore(s => s.outcome);
+  var progSofa        = usePrognosisStore(s => s.sofaScore);
+  var progActive      = usePrognosisStore(s => s.isActive);
+
+  var ardsSeverity: 'none' | 'mild' | 'moderate' | 'severe' = 'none';
+  if (ards.isActive) {
+    if (ards.severity >= 0.75) ardsSeverity = 'severe';
+    else if (ards.severity >= 0.45) ardsSeverity = 'moderate';
+    else ardsSeverity = 'mild';
+  }
+  var pf = fio2 > 0 ? Math.round(paO2 / fio2) : 400;
 
   var [showLab, setShowLab] = useState(false);
+  var [showVent, setShowVent] = useState(false);
   var [leftCollapsed, setLeftCollapsed] = useState(false);
   var [rightCollapsed, setRightCollapsed] = useState(false);
 
@@ -59,13 +79,31 @@ var MonitorApp: React.FC = function () {
              <button key={x} onClick={() => useTimeStore.getState().setSpeed(x)} style={{ background: spd === x ? '#1d4ed8' : '#1a2236', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 4, color: '#fff', fontFamily: MONO, fontWeight: 700, fontSize: '0.5rem', padding: '3px 6px', cursor: 'pointer' }}>{x}x</button>
           ))}
           <button onClick={() => setShowLab(true)} style={{ background: '#4c1d95', border: '1px solid rgba(167,139,250,0.3)', borderRadius: 4, color: '#c4b5fd', fontWeight: 700, fontSize: '0.55rem', padding: '3px 8px', cursor: 'pointer', marginLeft: 2 }}>LAB</button>
+          {isVentConnected && (
+            <button onClick={() => setShowVent(true)} style={{ background: '#0a2a0a', border: '1px solid rgba(52,211,153,0.4)', borderRadius: 4, color: '#34d399', fontWeight: 700, fontSize: '0.55rem', padding: '3px 8px', cursor: 'pointer', marginLeft: 2 }}>ARM</button>
+          )}
+          {progActive && (
+            <div style={{
+              background: progOutcome === 'death' ? '#3a0a0a' : progSofa >= 11 ? '#2a1a08' : '#0a1a0a',
+              border: `1px solid ${progOutcome === 'death' ? '#8a2a2a' : progSofa >= 11 ? '#7a4a08' : '#1a5a1a'}`,
+              borderRadius: 4, padding: '2px 7px', marginLeft: 2,
+              fontSize: '0.5rem', fontWeight: 900,
+              color: progOutcome === 'death' ? '#ff6060' : progSofa >= 11 ? '#ffaa40' : '#60cc60',
+              letterSpacing: '0.1em',
+            }}>
+              {progOutcome === 'death' ? '✕ ÓBITO' : `SOFA ${progSofa}`}
+            </div>
+          )}
         </div>
       </div>
 
-      <ARDSStatusBar />
+      <ARDSStatusBar severity={ardsSeverity} pao2Fio2Ratio={pf} />
+
+      {/* BODY: grid principal + panel ARM (cuando está activo) */}
+      <div className="flex-1 flex flex-col overflow-hidden min-h-0">
 
       {/* MAIN GRID */}
-      <div 
+      <div
         className="flex-1 grid gap-2 p-2 overflow-hidden min-h-0 transition-all duration-300 ease-in-out"
         style={{
           gridTemplateColumns: `${leftCollapsed ? '40px' : '22%'} 1fr ${rightCollapsed ? '40px' : '15%'}`
@@ -122,6 +160,10 @@ var MonitorApp: React.FC = function () {
           </div>
         </div>
       </div>
+
+      <VentilatorPanel isOpen={showVent} onClose={() => setShowVent(false)} />
+
+      </div>{/* end BODY */}
     </div>
   );
 };

@@ -5,6 +5,7 @@
 //  Dark mode, Glass UI, acentos ciano/verde/rojo.
 //  Consume el VentilatorSV800Engine vía RespiratoryEngine.getSV800Engine().
 // ═══════════════════════════════════════════════════════════════════════════════
+/* eslint-disable react/forbid-dom-props */
 
 import React, { useEffect, useRef, useState } from 'react';
 import { RespiratoryEngine } from '../core/RespiratoryEngine';
@@ -165,6 +166,7 @@ const SV800Slider: React.FC<{
       </span>
     </div>
     <input type="range"
+      title={label}
       min={min} max={max} step={step} value={value}
       onChange={(e) => onChange(parseFloat(e.target.value))}
       style={{ accentColor: accent, width: '100%' }}

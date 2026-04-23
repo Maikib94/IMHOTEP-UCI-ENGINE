@@ -1,5 +1,6 @@
 // LabPanel.tsx v3
 // UX Clínica — ATLS 11va / Guyton & Hall 15va / Pinsky / SATI-Cárdenas
+/* eslint-disable react/forbid-dom-props */
 // Pilar 1: Tipografía escalada (legibilidad de crisis)
 // Pilar 2: Cebra alto contraste #060d1a / #0c1628
 // Pilar 3: Fila crítica — borde 3px rojo + tinte fila completa

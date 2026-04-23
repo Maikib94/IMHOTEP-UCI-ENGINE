@@ -28,7 +28,7 @@ import {
   VentilatorSV800Engine,
   type SV800Settings,
   type PatientMechanics,
-} from '../VentilatorSV800Engine';
+} from './VentilatorSV800Engine';
 
 // ─── CONFIGURACIÓN DEL ESCENARIO ────────────────────────────────────────────
 

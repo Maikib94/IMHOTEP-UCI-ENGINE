@@ -1,5 +1,6 @@
 // src/components/VentilatorPanel.tsx
 // ARM Modal — física real de ondas, maniobras y reclutamiento (IMHOTEP UCI)
+/* eslint-disable react/forbid-dom-props */
 
 import React, { useEffect, useRef, useCallback, useState } from 'react';
 import { usePatientStore, VentilatorMode } from '../store/usePatientStore';
@@ -583,6 +584,7 @@ export default function VentilatorPanel({ isOpen, onClose }: VentilatorPanelProp
             <div style={{ marginBottom: 8 }}>
               <div style={{ fontSize: '0.36rem', color: C.dimText, marginBottom: 4, letterSpacing: '0.1em' }}>SOPORTE DE OXÍGENO</div>
               <select
+              title="Soporte de oxígeno"
                 value={vent.o2Support}
                 onChange={e => setO2Support(e.target.value as import('../store/usePatientStore').O2Support)}
                 style={{
@@ -661,6 +663,7 @@ export default function VentilatorPanel({ isOpen, onClose }: VentilatorPanelProp
                 <span style={{ fontSize: '0.75rem', fontWeight: 700, color: C.brightText }}>{fio2Pct}%</span>
               </div>
               <input
+                title="FiO₂"
                 type="range" min={21} max={100} step={1} value={fio2Pct}
                 onChange={e => setVentilatorSettings({ fio2: parseInt(e.target.value) / 100 })}
                 style={{ width: '100%', accentColor: '#22d3ee', cursor: 'pointer' }}

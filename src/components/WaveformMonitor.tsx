@@ -274,8 +274,8 @@ function computeVenousArtifact(pi: number, map: number, nowMs: number): number {
 function drawLabels(
   ctx: CanvasRenderingContext2D,
   W: number, v: VS,
-  audioCriticalRef: React.RefObject<HTMLAudioElement>,
-  audioWarningRef: React.RefObject<HTMLAudioElement>,
+  audioCriticalRef: React.RefObject<HTMLAudioElement | null>,
+  audioWarningRef: React.RefObject<HTMLAudioElement | null>,
   stRef: React.MutableRefObject<{ alarmLevel: 'none' | 'warning' | 'critical';[key: string]: any; }>
 ): void {
   const hr = isFinite(v.heartRate) ? Math.round(v.heartRate) : -1;

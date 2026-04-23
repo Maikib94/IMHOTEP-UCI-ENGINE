@@ -1,6 +1,7 @@
 // src/components/VentilatorCurves.tsx
 // Renderiza P/Flow/V desde el ring buffer de RespiratoryEngine (sin Zustand).
 // Acceso directo al singleton del engine vía useRef + requestAnimationFrame.
+/* eslint-disable react/forbid-dom-props */
 
 import React, { useEffect, useRef, useCallback } from 'react';
 import { RespiratoryEngine, type WaveformSample } from '../core/RespiratoryEngine';

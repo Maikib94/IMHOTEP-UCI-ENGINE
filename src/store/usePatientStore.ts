@@ -115,6 +115,8 @@ export interface Vitals {
 
 export type VentilatorMode = 'VC-AC' | 'PC-AC' | 'PSV' | 'SIMV' | 'CPAP';
 
+export type VentilatorPauseState = 'NONE' | 'INSPIRATORY' | 'EXPIRATORY';
+
 // Modos simplificados para UI del ventilador (Fase 2+)
 export type VentMode = 'VCV' | 'PCV' | 'PSV' | 'CPAP' | 'OFF';
 
@@ -255,6 +257,7 @@ export interface Ventilator {
 
   // ── Estado de pausa ──────────────────────────────────────────────────────
   isPaused: boolean;                    // congela tick de CronosEngine
+  pauseManeuver: VentilatorPauseState;  // maniobra operador: NONE | INSPIRATORY | EXPIRATORY
 
   // ── Outputs calculados (read-only para UI, escritos por RespiratoryEngine) ─
   fio2Effective: number;               // 0.21–1.0 (calculado según o2Support)
@@ -363,6 +366,7 @@ function sanitizeVentilator(partial: Partial<Ventilator>): Partial<Ventilator> {
   if (partial.mode !== undefined) out.mode = partial.mode;
   if (partial.flowPattern !== undefined) out.flowPattern = partial.flowPattern;
   if (partial.isPaused !== undefined) out.isPaused = partial.isPaused;
+  if (partial.pauseManeuver !== undefined) out.pauseManeuver = partial.pauseManeuver;
 
   for (const key of Object.keys(VENT_RANGES) as (keyof typeof VENT_RANGES)[]) {
     const val = (partial as Partial<Record<keyof Ventilator, number>>)[key];
@@ -423,6 +427,9 @@ interface PatientState {
   setVentilatorParam: (k: keyof Ventilator, v: number) => void;
   applyVentOutputs: (outputs: Pick<Ventilator, 'pPeak' | 'pPlateau' | 'pMean' | 'autoPEEP' | 'minuteVentilation' | 'fio2Effective'>) => void;
 
+  // Acciones Fase 3 — maniobras de pausa del operador
+  triggerPauseManeuver: (type: VentilatorPauseState) => void;
+
   // Acciones Fase 4
   setO2Support: (support: O2Support) => void;
 
@@ -461,6 +468,7 @@ export const usePatientStore = create<PatientState>((set) => ({
     pressureSupport: 10, flowRate: 40, ieRatio: 0.5, pControl: 15,
     iTime: 1.0, flowPattern: 'SQUARE',
     isPaused: false,
+    pauseManeuver: 'NONE',
     fio2Effective: 0.40,
     pPeak: 0, pPlateau: 0, pMean: 0, autoPEEP: 0, minuteVentilation: 0,
   },
@@ -555,6 +563,9 @@ export const usePatientStore = create<PatientState>((set) => ({
 
   toggleVentilatorPause: () =>
     set((s) => ({ ventilator: { ...s.ventilator, isPaused: !s.ventilator.isPaused } })),
+
+  triggerPauseManeuver: (type) =>
+    set((s) => ({ ventilator: { ...s.ventilator, pauseManeuver: type } })),
 
   setVentilatorParam: (k, v) => set((s) => {
     const range = VENT_RANGES[k];
