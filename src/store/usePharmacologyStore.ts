@@ -11,8 +11,8 @@ export type DrugId =
   'morphine' | 'fentanyl' | 'remifentanil' |
   // BNM
   'atracurium' | 'cisatracurium' | 'rocuronium' | 'pancuronium' |
-  // Antiarrítmicos (Fase 4)
-  'amiodarone' | 'digoxin';
+  // Antiarrítmicos (Fase 4 / v0.19)
+  'amiodarone' | 'digoxin' | 'esmolol';
 
 // ─── PK Definition ────────────────────────────────────────────────────────────
 export interface DrugPKDef {
@@ -315,6 +315,16 @@ export const DRUG_CATALOG: Record<DrugId, DrugCatalogEntry> = {
     pd: { ...ZERO_PD },
     // Inhibidor Na⁺/K⁺-ATPasa → potenciación vagal → enlentece conducción AV
     // Efecto cronotropo vía Hill en CardiovascularEngine.computeChronotropicEffect()
+  },
+  esmolol: {
+    // Clase II Vaughan-Williams (β₁-bloqueante cardioselectivo de acción ultrarrápida)
+    // Metabolismo: esterasas eritrocitarias → t½ plasmático ≈ 9 min
+    // Vd = 3.4 L/kg; CL masivo (285 mL/min/kg) → onset y offset en <10 min
+    // Dosis UCI: bolo 500 µg/kg en 1 min; infusión 50-200 µg/kg/min
+    // Ref: Goodman & Gilman 13ª cap.12; Schwartz Am J Cardiol 1985
+    id: 'esmolol', halfLifeMin: 9, vdLkg: 3.4, inputUnit: 'mcg/kg/min',
+    pd: { ...ZERO_PD },
+    // Efecto cronotropo vía Hill en CardiovascularEngine.computeAntiarrhythmicChronotropy()
   },
 };
 

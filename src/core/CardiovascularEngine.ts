@@ -62,24 +62,31 @@ const HEMO_PEEP_SYNERGY_MAX   = 0.60;   // 0.50 → 0.60
 const PEEP_VR_REDUCTION_PER_CMH2O = 0.025;   // fracción de SV por cmH₂O exceso
 const PEEP_VR_THRESHOLD           = 5;        // cmH₂O — por debajo sin efecto
 
-// ─── ANTIARRÍTMICOS — constantes PD cronotropas (Fase 4) ─────────────────────
+// ─── ANTIARRÍTMICOS — constantes PD cronotropas (Fase 4 / v0.19) ─────────────
 // Amiodarona (Vaughan-Williams III + efectos I,II,IV):
-//   - Reducción máxima de HR: 20% (bloqueo β + Ca²⁺ nodo AV)
+//   - Reducción máxima HR: 20% (bloqueo β + Ca²⁺ nodo AV)
 //   - Hill n=2.0 → efecto gradual, sin bradicardia brusca a dosis bajas
 //   - Ref: Goodman & Gilman 13ª cap. 30; Kowey JACC 2009
 // Digoxina (inhibidor Na⁺/K⁺-ATPasa, potenciación vagal):
-//   - Reducción máxima de HR: 15% (conducción AV enlentecida)
+//   - Reducción máxima HR: 15% (conducción AV enlentecida)
 //   - Hill n=1.5 → onset más suave, ventana terapéutica estrecha
 //   - Ref: Goodman & Gilman 13ª cap. 28; Gheorghiade EHJ 2010
-const AMIO_MAX_HR_REDUCTION = 0.20;
-const AMIO_HILL_N           = 2.0;
-const DIG_MAX_HR_REDUCTION  = 0.15;
-const DIG_HILL_N            = 1.5;
-// Sinergia: amio inhibe P-glicoproteína → ↑ niveles digoxina ~50-100%
+// Esmolol (β₁-bloqueante cardioselectivo ultrarrápido):
+//   - Reducción máxima HR: 30% (β₁ selectivo, onset <5 min, offset <10 min)
+//   - Hill n=1.8 → respuesta lineal-sigmoide en rango terapéutico
+//   - Ref: Schwartz Am J Cardiol 1985; Reves Anesth 1984
+const AMIO_MAX_HR_REDUCTION   = 0.20;
+const AMIO_HILL_N             = 2.0;
+const DIG_MAX_HR_REDUCTION    = 0.15;
+const DIG_HILL_N              = 1.5;
+const ESMOLOL_MAX_HR_REDUCTION = 0.30;
+const ESMOLOL_HILL_N           = 1.8;
+// Sinergia amio→dig: amio inhibe P-glicoproteína → ↑ niveles digoxina 50-100%
+//   Potenciación del efecto dig en función de conc relativa de amio (cap ×2).
 //   Ref: Nademanee AmHeartJ 1984; Hohnloser ClinPharmacol 1987
-const AMIO_DIG_SYNERGY_COEFF = 0.30;
-// Techo de reducción total para evitar bradicardia extrema por drogas solas
-const CHRONO_REDUCTION_CAP   = 0.40;
+const AMIO_DIG_POTENTIATION    = 0.50;  // spec v0.19: digPotentiation = 1 + 0.5×min(amioRel,1)
+// Techo de reducción total (amio + dig potenciada + esmolol) — seguridad clínica
+const CHRONO_REDUCTION_CAP     = 0.50;  // 50% cap (esmolol puede llegar más alto que v0.18)
 
 // ─── ACP / RV dysfunction (Lanspa Chest 2020; Vallabhajosyula Chest 2021) ─
 const ACP_SV_PENALTY           = 0.15;   // 15% adicional si ACP confirmado
@@ -353,28 +360,30 @@ export class CardiovascularEngine {
   }
 
   //  computeChronotropicEffect():
-  //    Lee plasmaConcentrations del store farmacológico.
-  //    cpRatio[amiodarone|digoxin] ≡ concentración normalizada:
-  //      1.0 ≡ nivel terapéutico (amio: 1.5 mg/L, dig: 1.2 ng/mL equiv).
-  //    Retorna factor multiplicador sobre HR (1.0 = sin cambio, < 1.0 = ↓HR).
+  //    Lee plasmaConcentrations del store farmacológico (cpRatio normalizado).
+  //    cpRatio = 1.0 ≡ concentración terapéutica de referencia por droga.
+  //    Retorna factor multiplicador sobre targetHR (1.0 = sin cambio, <1.0 = ↓HR).
+  //    Sinergia amio→dig: potenciación por inhibición P-glicoproteína (spec v0.19).
+  //    Esmolol: efecto aditivo, sin multiplicación (mecanismo distinto, Reves 1984).
   //
   private computeChronotropicEffect(): number {
     const cp = usePharmacologyStore.getState().plasmaConcentrations;
-    const amioRel = cp['amiodarone'] ?? 0;
-    const digRel  = cp['digoxin']   ?? 0;
+    const amioRel   = cp['amiodarone'] ?? 0;
+    const digRel    = cp['digoxin']    ?? 0;
+    const esmolRel  = cp['esmolol']    ?? 0;
 
-    const amioEffect = this.hillResponse(amioRel, AMIO_MAX_HR_REDUCTION, AMIO_HILL_N);
-    const digEffect  = this.hillResponse(digRel,  DIG_MAX_HR_REDUCTION,  DIG_HILL_N);
+    const amioEffect   = this.hillResponse(amioRel,  AMIO_MAX_HR_REDUCTION,    AMIO_HILL_N);
+    const digEffect    = this.hillResponse(digRel,   DIG_MAX_HR_REDUCTION,     DIG_HILL_N);
+    const esmolEffect  = this.hillResponse(esmolRel, ESMOLOL_MAX_HR_REDUCTION, ESMOLOL_HILL_N);
 
-    // Sinergia amiodarona-digoxina: inhib. P-glicoproteína → ↑ niveles digoxina
+    // Potenciación dig por amio: digPotentiation = 1 + 0.5×min(amioRel,1)
     // Ref: Nademanee AmHeartJ 1984; Hohnloser ClinPharmacol 1987
-    const synergy = 1 + AMIO_DIG_SYNERGY_COEFF
-      * Math.min(1, amioRel)
-      * Math.min(1, digRel);
+    const digPotentiation = 1 + AMIO_DIG_POTENTIATION * Math.min(1, amioRel);
 
+    // Esmolol aditivo (no multiplicativo — mecanismo β-bloqueante vs. canal iónico)
     const totalReduction = Math.min(
       CHRONO_REDUCTION_CAP,
-      amioEffect + digEffect * synergy,
+      amioEffect + digEffect * digPotentiation + esmolEffect,
     );
     return 1 - totalReduction;
   }

@@ -5,7 +5,7 @@
 //   Para añadir una droga: solo agregar entrada en DRUG_CATALOG (usePharmacologyStore).
 //   Este archivo NO necesita modificarse al agregar nuevos fármacos.
 //
-import { usePharmacologyStore, DrugId, PDSystemicEffects, DRUG_CATALOG } from '../store/usePharmacologyStore';
+import { usePharmacologyStore, type DrugId, type PDSystemicEffects, DRUG_CATALOG } from '../store/usePharmacologyStore';
 
 // Dosis de referencia para normalizar cpRatio.
 // stdMaxDose define cuándo cpRatio = 1.0 (dosis clínica alta estándar).
@@ -36,7 +36,7 @@ export const DRUG_MAX_DOSES: Record<DrugId, number> = {
   cisatracurium:   0.3,    // mg/kg/h
   rocuronium:      0.6,    // mg/kg/h
   pancuronium:     0.1,    // mg/kg/h
-  // Antiarrítmicos (Fase 4)
+  // Antiarrítmicos
   // Amiodarona: dosis ref 60 mg/h ≡ 1 mg/min (máx infusión UCI).
   //   Bolo 150 mg → cpRatio = 150/(60 × 1.5h) ≈ 1.67 → efecto Hill visible.
   //   Ref: AHA ACLS 2023; Goodman & Gilman 13ª cap. Antiarrítmicos.
@@ -46,7 +46,21 @@ export const DRUG_MAX_DOSES: Record<DrugId, number> = {
   //   Ventana terapéutica: cpRatio ≈ 0.67-1.67 (0.8-2.0 ng/mL equiv).
   //   Ref: Goodman & Gilman 13ª cap. Glucósidos cardíacos; KDIGO 2024.
   digoxin:         0.05,   // mg/h
+  // Esmolol: dosis ref 200 µg/kg/min (máx infusión; Schwartz Am J Cardiol 1985).
+  //   Bolo 500 µg/kg → ratio = 500 / (200 × 0.15h) ≈ 16.7 → cpRatio pico alto, decay rápido.
+  //   t½ = 9 min → efecto revertido en <10 min al suspender.
+  esmolol:        200.0,   // µg/kg/min
 };
+
+// ─── Cola de bolos lentos (Fase 3 v0.19) ─────────────────────────────────────
+// Permite simular bolos de administración extendida (p.ej. amiodarona 150 mg en 10 min).
+// Cada entrada se infunde linealmente distribuyendo el cpRatio total sobre durationSec.
+interface SlowBolus {
+  readonly drug: DrugId;
+  readonly totalRatio: number;  // cpRatio total que se distribuirá
+  readonly durationSec: number; // duración total en segundos de simulación
+  elapsedSec: number;           // tiempo transcurrido
+}
 
 export class PharmacologyEngine {
   private static instance: PharmacologyEngine | null = null;
@@ -55,11 +69,27 @@ export class PharmacologyEngine {
   // Cp > 1.0 posible en sobredosis o bolos. 3.0 = techo numérico.
   private cpRatio: Record<DrugId, number>;
 
+  // Cola de bolos lentos (bolo extendido: amio 10 min, etc.)
+  private slowBolusQueue: SlowBolus[] = [];
+
   private constructor() {
     this.cpRatio = Object.keys(DRUG_MAX_DOSES).reduce((acc, k) => {
       acc[k as DrugId] = 0;
       return acc;
     }, {} as Record<DrugId, number>);
+  }
+
+  /** Encola un bolo de administración lenta.
+   *  @param drug       - identificador del fármaco
+   *  @param doseMg     - dosis en mg (o µg según la droga)
+   *  @param durationSec - duración de infusión en segundos de simulación
+   */
+  public queueSlowBolus(drug: DrugId, doseMg: number, durationSec: number): void {
+    const maxRate   = DRUG_MAX_DOSES[drug] ?? 1;
+    const halfLifeH = (DRUG_CATALOG[drug]?.halfLifeMin ?? 60) / 60;
+    const totalRatio = Math.min(doseMg / (maxRate * halfLifeH), 6.0);
+    if (totalRatio <= 0) return;
+    this.slowBolusQueue.push({ drug, totalRatio, durationSec, elapsedSec: 0 });
   }
 
   public static getInstance(): PharmacologyEngine {
@@ -73,7 +103,27 @@ export class PharmacologyEngine {
     const store = usePharmacologyStore.getState();
     const { infusionRates } = store;
 
-    // ─── Procesar bolos pendientes ────────────────────────────────────────────
+    // ─── Procesar cola de bolos lentos ───────────────────────────────────────
+    // Cada bolo lento distribuye su ratio total linealmente durante durationSec.
+    if (this.slowBolusQueue.length > 0) {
+      const ratioPerSec: Partial<Record<DrugId, number>> = {};
+      const stillActive: SlowBolus[] = [];
+      for (const sb of this.slowBolusQueue) {
+        const remaining = sb.durationSec - sb.elapsedSec;
+        if (remaining <= 0) continue;
+        const dtClamped = Math.min(dtSeconds, remaining);
+        const rateThisTick = (sb.totalRatio / sb.durationSec) * dtClamped;
+        ratioPerSec[sb.drug] = (ratioPerSec[sb.drug] ?? 0) + rateThisTick;
+        sb.elapsedSec += dtSeconds;
+        if (sb.elapsedSec < sb.durationSec) stillActive.push(sb);
+      }
+      this.slowBolusQueue = stillActive;
+      for (const [dId, ratio] of Object.entries(ratioPerSec) as [DrugId, number][]) {
+        this.cpRatio[dId] = Math.min(6.0, (this.cpRatio[dId] ?? 0) + ratio);
+      }
+    }
+
+    // ─── Procesar bolos pendientes (instantáneos) ─────────────────────────────
     const pending = store.pendingBolusRatios;
     const pendingKeys = Object.keys(pending) as DrugId[];
     if (pendingKeys.length > 0) {
