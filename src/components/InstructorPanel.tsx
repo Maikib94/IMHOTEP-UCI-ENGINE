@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { usePathologyStore } from '../store/usePathologyStore';
+import ProceduresPanel from './ProceduresPanel';
 import {
   usePatientStore,
   FLUID_CATALOG,
@@ -727,6 +728,9 @@ export const InstructorPanel: React.FC = () => {
             )}
           </div>
         )}
+
+        {/* Procedimientos Invasivos */}
+        <ProceduresPanel />
 
         {/* Acciones Globales */}
         <div className="border-t border-white/5 pt-2 flex flex-col gap-1.5">

@@ -5,6 +5,7 @@
 //   PRIS modelado en DrugPDProfile.metabolicStress (propofol, thiopental).
 //
 import { usePatientStore }      from '../store/usePatientStore';
+import { usePathologyStore }    from '../store/usePathologyStore';
 import { usePharmacologyStore } from '../store/usePharmacologyStore';
 
 const HH_PKA             = 6.1;
@@ -58,25 +59,66 @@ export class AcidBaseEngine {
     const upd   = store.updateVitals;
     const vol   = store.bloodVolume;
 
-    // ─── Lactato: hipoperfusión + PRIS farmacológico ─────────────────────────────
-    // PRIS (Propofol Infusion Syndrome): infusiones prolongadas >4mg/kg/h (Cp>1)
-    // causan desacoplamiento de la fosforilación oxidativa mitocondrial:
-    // lactato ↑, pH ↓, acidosis metabólica con AG↑.
-    // Ref: Corbett SM et al. — Propofol-related infusion syndrome
-    //      in intensive care patients. Pharmacotherapy 2008;28(8):983-8.
+    // ─── Lactato: cinética ODE multi-mecanismo ───────────────────────────────────
+    //
+    // Refs: Vincent JL, De Backer D. Crit Care 2016;20:255.
+    //       Bakker J et al., Ann Intensive Care 2013;3:12. DOI: 10.1186/2110-5820-3-12
+    //       Levy B et al., NEJM 2018;378:583 (catecolaminas exógenas).
+    //       Brealey D et al., Lancet 2002;360:219 (disfunción mitocondrial séptica).
+    //       Corbett SM et al., Pharmacotherapy 2008;28:983-8 (PRIS).
     const { systemicEffects: pd } = usePharmacologyStore.getState();
-    // pd.metabolicStress: 0–1 (cuadrático en Cp, calculado en PharmacologyEngine)
-    // Amplifica el objetivo de lactato en hasta +4 mmol/L en PRIS pleno.
-    const lacPrisBump = pd.metabolicStress * 4.0;
+    const path = usePathologyStore.getState();
+    const profile = store.profile;
+    const weightKg = profile?.weightKg ?? (v.weight ?? 70);
 
-    const mapDeficit = Math.max(0, MAP_PERF_THR - v.meanArterialPressure);
-    const coDeficit  = Math.max(0, CO_PERF_THR  - v.cardiacOutput);
-    const lacTgt     = Math.min(LACTATE_MAX,
-      LACTATE_NORMAL + mapDeficit * LAC_MAP_COEFF + coDeficit * LAC_CO_COEFF + lacPrisBump
-    );
-    const newLactate  = Math.max(LACTATE_MIN, Math.min(LACTATE_MAX,
-      v.lactate + (lacTgt - v.lactate) * K_LACTATE * dt
-    ));
+    // 1. DO₂ estimado (mL/kg/min) — CaO₂ = 1.34×Hb×SpO₂ + 0.003×PaO₂
+    const hbEst   = 14 * (vol / 5000);  // Hb aproximada desde volemia
+    const cao2    = (1.34 * hbEst * (v.spo2 / 100)) + (0.003 * v.paO2);
+    const do2Total = cao2 * v.cardiacOutput * 10;   // mL/min
+    const do2_kgmin = do2Total / Math.max(1, weightKg);
+
+    // 2. Producción anaerobia (mmol/L/h) — DO₂ crit ~7 mL/kg/min
+    const DO2_CRIT = 7.0;
+    const anaerobicProd = do2_kgmin < DO2_CRIT
+      ? Math.pow(Math.max(0, DO2_CRIT - do2_kgmin), 1.5) * 0.4
+      : 0;
+
+    // 3. Disfunción mitocondrial séptica (Brealey Lancet 2002)
+    const sepSev = path.sepsis?.isActive ? (path.sepsis?.severity ?? 0) : 0;
+    const sepsisProd = sepSev > 0.4 ? (sepSev - 0.4) * 1.0 : 0;
+
+    // 4. Catecolaminas exógenas → gluconeogénesis / ciclo de Cori (Levy NEJM 2018)
+    const cateProd = Math.max(0, (pd.beta1 ?? 0) * 0.6 + (pd.beta2 ?? 0) * 0.3);
+
+    // 5. PRIS (pd.metabolicStress > 0 → propofol en dosis supraterapéutica)
+    const lacPrisBump = (pd.metabolicStress ?? 0) * 4.0;
+
+    const totalProdH = anaerobicProd + sepsisProd + cateProd + lacPrisBump * 0.1;
+
+    // 6. Aclaramiento hepato-renal: t½ 30 min normal, 2h en hipoperfusión
+    const tHalf_h     = do2_kgmin >= DO2_CRIT ? 0.5 : 2.0;
+    const k_clearance = Math.LN2 / (tHalf_h * 3600);  // s⁻¹
+
+    // 7. ODE: dL/dt = prod/s − k × (L − baseline)
+    const prodPerSec = totalProdH / 3600;
+    const dLdt = prodPerSec - k_clearance * Math.max(0, v.lactate - LACTATE_NORMAL);
+
+    // Blend: cinética completa si vitales válidos; fallback MAP/CO si no
+    const useDynamic = v.cardiacOutput > 0.5 && v.spo2 > 10 && isFinite(do2_kgmin);
+    let newLactate: number;
+    if (useDynamic) {
+      newLactate = Math.max(LACTATE_MIN, Math.min(LACTATE_MAX, v.lactate + dLdt * dt));
+    } else {
+      // Fallback legacy (MAP/CO deficit)
+      const mapDeficit = Math.max(0, MAP_PERF_THR - v.meanArterialPressure);
+      const coDeficit  = Math.max(0, CO_PERF_THR  - v.cardiacOutput);
+      const lacTgtFallback = Math.min(LACTATE_MAX,
+        LACTATE_NORMAL + mapDeficit * LAC_MAP_COEFF + coDeficit * LAC_CO_COEFF + lacPrisBump
+      );
+      newLactate = Math.max(LACTATE_MIN, Math.min(LACTATE_MAX,
+        v.lactate + (lacTgtFallback - v.lactate) * K_LACTATE * dt
+      ));
+    }
 
     const lacDelta      = newLactate - v.lactate;
     const hco3FromLac   = -(lacDelta * BICARB_BUFFER);

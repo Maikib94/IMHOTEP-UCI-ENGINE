@@ -1,9 +1,19 @@
-import React, { useEffect, useState } from 'react';
-import { usePatientStore } from '../store/usePatientStore';
+import React, { useEffect, useState, useMemo } from 'react';
+import { usePatientStore }  from '../store/usePatientStore';
+import { usePathologyStore } from '../store/usePathologyStore';
+import { useTimeStore }      from '../store/useTimeStore';
+import { triggerNIBPNow }    from '../hooks/useNIBPCycle';
+import { NIBPCuffProgress }  from './NIBPCuffAnimation';
 
 // Tailwind arbitrary class — reemplaza todos los style={{ fontFamily: MONO }} del archivo.
 // Equivalente exacto de "'JetBrains Mono', monospace" sin inline style.
 const MONO_CLASS = "[font-family:'JetBrains_Mono',monospace]";
+
+// Formateador seguro con clamp para evitar desbordamiento 4 dígitos imposibles
+function fmtV(v: number, lo: number, hi: number, digits = 0): string {
+  if (!isFinite(v)) return '--';
+  return Math.max(lo, Math.min(hi, v)).toFixed(digits);
+}
 
 type SpO2SensorState = 'normal' | 'artifact' | 'fail';
 
@@ -105,6 +115,26 @@ export default function VitalSignsPanel() {
     return () => clearInterval(iv);
   }, []);
 
+  // ── Procedures & caseCategory state ───────────────────────────────────────
+  const procedures   = usePatientStore(s => s.procedures);
+  const caseCategory = usePathologyStore(s => s.caseCategory);
+  const currentTicks = useTimeStore(s => s.ticks);
+
+  const useNIBP   = !procedures.arterialLine;
+  const showPIC   = procedures.picMonitor || caseCategory === 'neuro';
+  const nibpSample = procedures.nibp.lastSample;
+
+  // NIBP countdown (seconds until next measurement)
+  const nibpCountdown = useMemo(() => {
+    if (!useNIBP || !nibpSample) return null;
+    const intervalS = procedures.nibp.intervalMinutes * 60;
+    const elapsed   = currentTicks - nibpSample.capturedAtTick;
+    const remaining = Math.max(0, intervalS - elapsed);
+    const mm = Math.floor(remaining / 60);
+    const ss = remaining % 60;
+    return `${mm}:${String(ss).padStart(2, '0')}`;
+  }, [useNIBP, nibpSample, currentTicks, procedures.nibp.intervalMinutes]);
+
   const { hr, sys, dia, map, rr, etco2, ppico, pplat, pi, temp, uoMl, gcs, icp } = dv;
 
   // PPC (Presión de Perfusión Cerebral) = PAM - PIC (target ≥ 60 mmHg)
@@ -131,7 +161,7 @@ export default function VitalSignsPanel() {
       <VitalCard title="HR" colorClass="text-[#39ff14]" className="h-[76px] shrink-0">
         <div className="relative flex items-end">
           <div className={`text-4xl font-black leading-none text-[#39ff14] ${MONO_CLASS}`}>
-            {hr}
+            {fmtV(hr, 20, 250)}
           </div>
           <div className="text-xs opacity-50 ml-2 mb-1 text-[#39ff14]">bpm</div>
           <div className="absolute right-0 top-0 text-[#39ff14]">
@@ -143,27 +173,71 @@ export default function VitalSignsPanel() {
         </div>
       </VitalCard>
 
-      {/* NIBP / ABP Card */}
-      <VitalCard title="BP" colorClass="text-[#ff3366]" className="h-[76px] shrink-0">
-        <div className="flex items-baseline gap-0.5 relative">
-          <span className={`text-4xl font-black text-[#ff3366] leading-none ${MONO_CLASS}`}>
-            {sys}
-          </span>
-          <span className={`text-xl font-light opacity-40 text-[#ff3366] leading-none ${MONO_CLASS}`}>/</span>
-          <span className={`text-2xl font-bold text-[#ff3366] leading-none ${MONO_CLASS}`}>
-            {dia}
-          </span>
-          <div className="absolute right-0 top-0 text-[#ff3366]">
-            {sys < 90 ? '↓↓' : sys > 160 ? '↑↑' : ''}
+      {/* ABP card — Línea Arterial activa (valores live, rojo) */}
+      {!useNIBP && (
+        <VitalCard title="ABP" colorClass="text-[#ff3366]" className="h-[90px] shrink-0">
+          <div className="flex items-baseline gap-0.5 relative">
+            <span className={`text-4xl font-black text-[#ff3366] leading-none ${MONO_CLASS}`}>{fmtV(sys, 40, 280)}</span>
+            <span className={`text-xl font-light opacity-40 text-[#ff3366] leading-none ${MONO_CLASS}`}>/</span>
+            <span className={`text-2xl font-bold text-[#ff3366] leading-none ${MONO_CLASS}`}>{fmtV(dia, 20, 180)}</span>
+            <div className="absolute right-0 top-0 text-[#ff3366]">{sys < 90 ? '↓↓' : sys > 160 ? '↑↑' : ''}</div>
           </div>
-        </div>
-        <div className="flex justify-between items-center mt-1">
-          <div className={`text-xs opacity-70 text-[#ff3366] leading-none ${MONO_CLASS}`}>
-            ({map})
+          <div className="flex justify-between items-center mt-1">
+            <div className={`text-xs opacity-70 text-[#ff3366] leading-none ${MONO_CLASS}`}>({fmtV(map, 20, 180)})</div>
+            <div className="text-[10px] text-[#ff4466] opacity-60">ART · {procedures.arterialSite.replace('_', ' ')}</div>
           </div>
-          <div className="text-[10px] opacity-50 text-[#ff3366] leading-none">mmHg</div>
-        </div>
-      </VitalCard>
+        </VitalCard>
+      )}
+
+      {/* NIBP card — Sin línea arterial (snapshot, ámbar, con countdown) */}
+      {useNIBP && (
+        <VitalCard title="NIBP" colorClass="text-[#fbbf24]" className="h-[110px] shrink-0">
+          {nibpSample ? (
+            <>
+              <div className="flex items-baseline gap-0.5 relative">
+                <span className={`text-4xl font-black text-[#fbbf24] leading-none ${MONO_CLASS}`}>{nibpSample.systolicBP}</span>
+                <span className={`text-xl font-light opacity-40 text-[#fbbf24] leading-none ${MONO_CLASS}`}>/</span>
+                <span className={`text-2xl font-bold text-[#fbbf24] leading-none ${MONO_CLASS}`}>{nibpSample.diastolicBP}</span>
+                <div className="absolute right-0 top-0 text-[#fbbf24]">{nibpSample.systolicBP < 90 ? '↓↓' : ''}</div>
+              </div>
+              <div className="flex justify-between items-center mt-0.5">
+                <div className={`text-xs opacity-70 text-[#fbbf24] leading-none ${MONO_CLASS}`}>({nibpSample.meanArterialPressure})</div>
+                <div className="text-[10px] opacity-50 text-[#fbbf24] leading-none">mmHg</div>
+              </div>
+              {nibpSample.systolicBP < 90 && nibpSample.meanArterialPressure < 65 && (
+                <div className="text-[8px] text-amber-600 mt-0.5">⚠ NIBP poco fiable (Lehman 2013)</div>
+              )}
+            </>
+          ) : (
+            <div className="text-2xl font-black text-amber-700 opacity-60">---/---</div>
+          )}
+          {/* Countdown + intervalo */}
+          <div className="flex items-center justify-between mt-1">
+            <div className="text-[9px] text-amber-600 font-mono">
+              {nibpCountdown ? `Próx: ${nibpCountdown}` : 'Midiendo...'}
+            </div>
+            <div className="flex gap-0.5">
+              {([5, 10, 15, 30] as const).map(m => (
+                <button key={m} type="button"
+                  onClick={() => usePatientStore.getState().setNIBPInterval(m)}
+                  className="text-[8px] px-1 rounded cursor-pointer"
+                  style={{
+                    background:  procedures.nibp.intervalMinutes === m ? 'rgba(251,191,36,0.25)' : 'rgba(0,0,0,0.3)',
+                    color:       procedures.nibp.intervalMinutes === m ? '#fbbf24' : '#475569',
+                    border:      `1px solid ${procedures.nibp.intervalMinutes === m ? '#fbbf24' : 'rgba(255,255,255,0.06)'}`,
+                  }}
+                >{m}′</button>
+              ))}
+            </div>
+          </div>
+          {/* Inline inflation progress — replaces floating overlay (Bug 4) */}
+          <NIBPCuffProgress />
+          <button type="button" onClick={triggerNIBPNow}
+            className="w-full mt-1 text-[8px] text-amber-600 hover:text-amber-400 cursor-pointer border border-amber-800/30 rounded py-0.5">
+            Medir Ahora
+          </button>
+        </VitalCard>
+      )}
 
       {/* SpO2 Card */}
       <VitalCard title="SpO2" colorClass={spo2Art.colorClass} className="h-[76px] shrink-0">
@@ -181,31 +255,31 @@ export default function VitalSignsPanel() {
         <div className="flex flex-col justify-around h-full">
           <div className="flex justify-between items-center">
             <div className="flex items-baseline gap-1">
-              <span className={`text-4xl font-black text-[#a3e635] leading-none ${MONO_CLASS}`}>{etco2}</span>
+              <span className={`text-4xl font-black text-[#a3e635] leading-none ${MONO_CLASS}`}>{fmtV(etco2, 10, 80)}</span>
               <span className="text-[10px] opacity-50 text-[#a3e635]">mmHg</span>
             </div>
             <div className="text-[10px] font-mono opacity-50 text-[#a3e635] text-right">
-              Ppic:{ppico}<br/>Pplat:{pplat}
+              Ppic:{fmtV(ppico, 0, 80)}<br/>Pplat:{fmtV(pplat, 0, 60)}
             </div>
           </div>
           <div className="w-full h-px bg-white/10 my-1"></div>
           <div className="flex justify-between items-center">
             <div className="flex items-baseline gap-1">
-              <span className={`text-4xl font-black text-white leading-none ${MONO_CLASS}`}>{rr}</span>
+              <span className={`text-4xl font-black text-white leading-none ${MONO_CLASS}`}>{fmtV(rr, 0, 60)}</span>
               <span className="text-[10px] opacity-50 text-white">rpm</span>
             </div>
           </div>
         </div>
       </VitalCard>
 
-      {/* PIC / PPC Card */}
-      <VitalCard title="PIC / PPC" colorClass={icpTextClass} className="h-[76px] shrink-0 mt-2">
+      {/* PIC / PPC Card — solo visible con monitor activo o caso neuro */}
+      {showPIC && <VitalCard title={`PIC / PPC${procedures.icpDevice === 'ventricular_evd' ? ' · DVE' : procedures.icpDevice === 'parenchymal' ? ' · Codman' : ''}`} colorClass={icpTextClass} className="h-[76px] shrink-0 mt-2">
         <div className="flex items-center justify-between h-full">
           {/* PIC */}
           <div className="flex flex-col">
             <div className="flex items-baseline gap-0.5">
               <span className={`text-4xl font-black leading-none transition-colors duration-500 ${MONO_CLASS} ${icpTextClass}`}>
-                {icp}
+                {fmtV(icp, 0, 60)}
               </span>
               <span className={`text-[10px] opacity-50 leading-none ${icpTextClass}`}>mmHg</span>
             </div>
@@ -218,7 +292,7 @@ export default function VitalSignsPanel() {
             <div className="flex items-baseline gap-0.5">
               <span className={`text-[9px] opacity-60 mr-0.5 ${cppTextClass}`}>PPC</span>
               <span className={`text-2xl font-black leading-none transition-colors duration-500 ${MONO_CLASS} ${cppTextClass}`}>
-                {cpp}
+                {fmtV(cpp, 0, 100)}
               </span>
             </div>
             <div className={`text-[9px] font-mono opacity-70 mt-0.5 ${cppTextClass}`}>
@@ -231,7 +305,7 @@ export default function VitalSignsPanel() {
             </div>
           )}
         </div>
-      </VitalCard>
+      </VitalCard>}
 
       {/* TEMP / DIURESIS Card */}
       <VitalCard title="TEMP / DIURESIS" colorClass={tempTextClass} className="h-[76px] shrink-0 mt-1">
@@ -240,7 +314,7 @@ export default function VitalSignsPanel() {
           <div className="flex flex-col justify-center">
             <div className="flex items-baseline gap-1">
               <span className={`text-3xl font-black leading-none transition-colors duration-500 ${MONO_CLASS} ${tempTextClass}`}>
-                {temp.toFixed(1)}
+                {fmtV(temp, 32, 42, 1)}
               </span>
               <span className={`text-[10px] opacity-50 leading-none ${tempTextClass}`}>°C</span>
             </div>
@@ -253,7 +327,7 @@ export default function VitalSignsPanel() {
           <div className="flex flex-col justify-center items-end">
             <div className="flex items-baseline gap-1">
               <span className={`text-3xl font-black leading-none transition-colors duration-500 ${MONO_CLASS} ${uoTextClass}`}>
-                {uoMl}
+                {fmtV(uoMl, 0, 500)}
               </span>
               <span className={`text-[10px] opacity-50 leading-none ${uoTextClass}`}>ml/h</span>
             </div>
@@ -269,7 +343,7 @@ export default function VitalSignsPanel() {
         <div>
           <div className="text-[0.65rem] font-bold text-gray-400 leading-none mb-1">SOFA Score</div>
           <div className="text-[0.55rem] text-gray-500 leading-none">
-            GCS:{gcs} │ SpO2:{dv.spo2Real}% │ MAP:{map}
+            GCS:{gcs} │ SpO2:{dv.spo2Real}% │ MAP:{fmtV(map, 20, 180)}
           </div>
         </div>
         <div className={`text-3xl font-black leading-none ${MONO_CLASS} ${sofaTextClass}`}>

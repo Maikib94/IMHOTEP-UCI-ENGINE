@@ -1,10 +1,13 @@
 // src/components/clinical/drugControls.tsx
-// Helpers compartidos para controles de droga (slider toggle + barra de progreso).
-// Separados del panel principal para ser reutilizados por sub-componentes.
+// Helpers compartidos: InfusionControl (vasopresores/inotrópicos), DrugControlCard (antiarrítmicos).
+// DrugControlCard: layout horizontal con ▲▼ stepper + botón BOLO, idéntico en estética.
 
 import React from 'react';
 import { usePharmacologyStore, type DrugId, DRUG_CATALOG } from '../../store/usePharmacologyStore';
 import { DRUG_MAX_DOSES } from '../../core/PharmacologyEngine';
+import { usePatientStore } from '../../store/usePatientStore';
+import { useUIStore } from '../../store/useUIStore';
+import { doseToCcH, type DrugUnit } from '../../utils/dilutionTable';
 
 // ─── Paleta de colores por tema ───────────────────────────────────────────────
 
@@ -38,53 +41,103 @@ export function ProgressBar({
   );
 }
 
-// ─── Infusion control row (toggle + número) ───────────────────────────────────
+// ─── Infusion control row — stepper + always-editable input + cc/h ──────────
+// FIX: input is ALWAYS editable (no read-only when rate > 0)
 
-interface InfusionControlProps {
-  label: string;
-  drug: DrugId;
-  unit: string;
-  step?: number;
-  colorTheme?: ColorTheme;
+export interface InfusionControlProps {
+  label:            string;
+  drug:             DrugId;
+  unit:             string;
+  step?:            number;
+  colorTheme?:      ColorTheme;
+  showDilutionGear?: boolean;
 }
 
-export function InfusionControl({ label, drug, unit, step = 0.05, colorTheme = 'cyan' }: InfusionControlProps) {
-  const value       = usePharmacologyStore(s => s.infusionRates[drug] ?? 0);
-  const setRate     = usePharmacologyStore(s => s.setInfusionRate);
+export function InfusionControl({
+  label, drug, unit, step, colorTheme = 'cyan',
+}: InfusionControlProps) {
+  const rate      = usePharmacologyStore(s => s.infusionRates[drug] ?? 0);
+  const setRate   = usePharmacologyStore(s => s.setInfusionRate);
+  const dripMode  = useUIStore(s => s.dripUnitMode);
+  const weight    = usePatientStore(s => s.vitals.weight ?? 70);
+
   const t = THEME_COLORS[colorTheme];
-  const isActive = value > 0;
+  const isActive  = rate > 0;
+  const maxRate   = DRUG_MAX_DOSES[drug] ?? 100;
+  const stepSize  = step ?? Math.max(0.01, maxRate * 0.05);
+
+  const ccH = doseToCcH(drug, rate, unit as DrugUnit, weight);
+
+  function nudge(delta: number) {
+    // Only prevents negative values — no upper cap (pedagogía libre de over-dosing)
+    const next = Math.max(0, rate + delta);
+    setRate(drug, parseFloat(next.toFixed(3)));
+  }
 
   return (
-    <div className="flex items-center justify-between bg-[#0f172a] p-2 rounded-lg border border-white/5 mb-2 hover:border-white/10 transition-colors">
-      <div className="flex items-center gap-3">
-        <button
-          type="button"
-          aria-label={label}
-          title={label}
-          onClick={() => setRate(drug, isActive ? 0 : step)}
-          className={`w-8 h-4 rounded-full relative transition-colors duration-300 ${isActive ? `${t.bg} ${t.shadow}` : 'bg-slate-700'}`}
-        >
-          <div className={`absolute top-0.5 left-0.5 w-3 h-3 rounded-full bg-white transition-transform duration-300 ${isActive ? 'translate-x-4' : 'translate-x-0'}`} />
-        </button>
-        <span className={`text-[0.55rem] font-bold uppercase tracking-wider ${isActive ? t.text : 'text-slate-400'}`}>
-          {label}
+    <div className={`flex items-center gap-1.5 px-2 py-1 rounded-lg border transition-colors mb-1 ${
+      isActive ? 'border-white/10 bg-[#0f1b2d]' : 'border-white/5 bg-[#0f172a]'
+    }`}>
+      {/* Label */}
+      <span className={`text-[0.5rem] font-bold w-24 shrink-0 truncate ${isActive ? t.text : 'text-slate-500'}`}>
+        {label}
+      </span>
+
+      {/* Stepper − */}
+      <button type="button" onClick={() => nudge(-stepSize)}
+        className="w-5 h-5 flex items-center justify-center text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700 rounded text-[0.65rem] font-bold cursor-pointer shrink-0">
+        −
+      </button>
+
+      {/* Input — ALWAYS editable (read-only bug fix) */}
+      <input
+        type="number"
+        value={rate === 0 ? '' : Number(rate).toFixed(2)}
+        placeholder="0.00"
+        step={stepSize}
+        min={0}
+        title={label}
+        onChange={e => {
+          const v = parseFloat(e.target.value);
+          setRate(drug, Number.isNaN(v) ? 0 : Math.max(0, v));
+        }}
+        className={`w-12 bg-[#1e293b] text-right text-[0.6rem] border border-slate-700 rounded px-1 py-0.5 focus:outline-none font-mono ${t.input}`}
+      />
+
+      {/* Stepper + */}
+      <button type="button" onClick={() => nudge(+stepSize)}
+        className="w-5 h-5 flex items-center justify-center text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700 rounded text-[0.65rem] font-bold cursor-pointer shrink-0">
+        +
+      </button>
+
+      {/* Unit */}
+      <span className="text-[0.42rem] text-slate-500 flex-1 min-w-0 truncate">{unit}</span>
+
+      {/* cc/h badge — visible when dripMode is not pure medical */}
+      {dripMode !== 'medical' && ccH > 0 && (
+        <span className="text-[0.42rem] text-cyan-300 font-mono whitespace-nowrap shrink-0">
+          ≈{ccH.toFixed(1)}
         </span>
-      </div>
-      <div className="flex items-center gap-2">
-        <input
-          type="number"
-          value={value === 0 ? '' : Number(value).toFixed(2)}
-          placeholder="0.00"
-          step={step}
-          title={label}
-          onChange={e => {
-            const val = parseFloat(e.target.value);
-            setRate(drug, isNaN(val) ? 0 : val);
-          }}
-          className={`w-16 bg-[#1e293b] text-right text-xs border border-slate-700 rounded px-1.5 py-0.5 focus:outline-none font-mono shadow-inner placeholder-slate-600 ${t.input}`}
-        />
-        <span className="text-[0.5rem] text-slate-500 w-12 shrink-0">{unit}</span>
-      </div>
+      )}
+
+      {/* ⚠ over-range badge — non-blocking feedback when above clinical cap */}
+      {rate > maxRate && (
+        <span
+          className="text-[0.38rem] font-bold text-amber-400 px-0.5 rounded border border-amber-700/40 bg-amber-900/20 shrink-0 whitespace-nowrap"
+          title="Dosis fuera del rango clínico estándar — observe respuesta y efectos adversos"
+        >
+          ⚠&gt;máx
+        </span>
+      )}
+
+      {/* Stop button — only when rate > 0 */}
+      {isActive && (
+        <button type="button" onClick={() => setRate(drug, 0)}
+          title="Detener infusión"
+          className="text-[0.6rem] text-slate-600 hover:text-red-400 cursor-pointer shrink-0 leading-none">
+          ⏹
+        </button>
+      )}
     </div>
   );
 }
@@ -140,13 +193,63 @@ export function BolusRow({ label, drug: _drug, dose, unit, colorTheme = 'yellow'
 }
 
 // ─── Hook para administrar bolo ───────────────────────────────────────────────
+// Bug 3 fix: now also calls addBolusHistory so all boluses appear in DoseAgenda.
+
+import { useTimeStore } from '../../store/useTimeStore';
 
 export function useBolusAdmin() {
   const queueBolusRatio = usePharmacologyStore(s => s.queueBolusRatio);
-  return (drug: DrugId, doseMg: number) => {
-    const maxRate   = DRUG_MAX_DOSES[drug];
-    const halfLifeH = DRUG_CATALOG[drug].halfLifeMin / 60;
+  const addBolusHistory = usePharmacologyStore(s => s.addBolusHistory);
+
+  return (drug: DrugId, doseMg: number, route: 'iv' | 'oral' = 'iv') => {
+    if (!Number.isFinite(doseMg) || doseMg <= 0) {
+      console.warn(`[BOLUS] Invalid dose for ${drug}: ${doseMg}`);
+      return;
+    }
+    // 1) PK effect
+    const maxRate   = DRUG_MAX_DOSES[drug] ?? 1;
+    const halfLifeH = (DRUG_CATALOG[drug]?.halfLifeMin ?? 60) / 60;
     const ratio     = doseMg / (maxRate * halfLifeH);
     queueBolusRatio(drug, Math.min(ratio, 3.0));
+
+    // 2) Agenda registration
+    const currentTick = useTimeStore.getState().ticks;
+    addBolusHistory(drug, doseMg, currentTick, route);
   };
+}
+
+// ─── DrugControlCard — @deprecated wrapper retro-compat ───────────────────────
+// Use InfusionControl + BolusRow separately. Kept for legacy imports.
+
+interface DrugControlCardProps {
+  label:       string;
+  drug:        DrugId;
+  unit:        string;
+  step:        number;
+  bolusLabel:  string;
+  onBolus:     () => void;
+  colorTheme?: ColorTheme;
+  decimals?:   number;
+}
+
+export function DrugControlCard({
+  label, drug, unit, step, bolusLabel, onBolus,
+  colorTheme = 'violet',
+}: DrugControlCardProps) {
+  return (
+    <div className="space-y-1 mb-1">
+      <InfusionControl label={label} drug={drug} unit={unit} step={step} colorTheme={colorTheme} />
+      <button
+        type="button"
+        onClick={onBolus}
+        className={`w-full py-0.5 px-1 rounded text-[0.45rem] font-bold uppercase tracking-wider cursor-pointer ${
+          colorTheme === 'violet'
+            ? 'bg-violet-900/20 border border-violet-700/40 text-violet-400 hover:bg-violet-800/30'
+            : 'bg-slate-900/20 border border-slate-700/40 text-slate-400 hover:bg-slate-800/30'
+        }`}
+      >
+        ↑ BOLO {bolusLabel}
+      </button>
+    </div>
+  );
 }

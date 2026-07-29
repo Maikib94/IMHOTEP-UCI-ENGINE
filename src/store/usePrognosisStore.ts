@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import type { LethalCauseId } from '../data/LethalThresholds';
 
 export type OutcomeType =
   | 'ongoing'
@@ -25,6 +26,8 @@ interface PrognosisState {
   outcomeDay: number;
   managementScore: number;  // 0-1: calidad del manejo
   icuDaysSim: number;       // días de UCI en tiempo simulado
+  /** Causa letal aguda que disparó la muerte (AcuteMortalityEngine) */
+  lethalCause: LethalCauseId | null;
 
   activate: () => void;
   deactivate: () => void;
@@ -36,6 +39,7 @@ interface PrognosisState {
     icuDays: number,
   ) => void;
   setOutcome: (o: OutcomeType, day: number) => void;
+  setLethalCause: (cause: LethalCauseId | null) => void;
   reset: () => void;
 }
 
@@ -53,6 +57,7 @@ export const usePrognosisStore = create<PrognosisState>((set) => ({
   outcomeDay: 0,
   managementScore: 0.5,
   icuDaysSim: 0,
+  lethalCause: null,
 
   activate: () => set({ isActive: true }),
   deactivate: () => set({ isActive: false }),
@@ -61,6 +66,7 @@ export const usePrognosisStore = create<PrognosisState>((set) => ({
     set({ sofaScore: sofa, sofaComponents: components, apacheII: apache, managementScore: mgmt, icuDaysSim: icuDays }),
 
   setOutcome: (o, day) => set({ outcome: o, outcomeDay: day }),
+  setLethalCause: (cause) => set({ lethalCause: cause }),
 
   reset: () => set({
     isActive: false,
@@ -71,5 +77,6 @@ export const usePrognosisStore = create<PrognosisState>((set) => ({
     outcomeDay: 0,
     managementScore: 0.5,
     icuDaysSim: 0,
+    lethalCause: null,
   }),
 }));

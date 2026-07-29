@@ -295,38 +295,46 @@ function CultureSiteRow({
   );
 }
 
+const MAX_ACTIVE_ATB = 5;
+
 // ─── Componente Principal: CulturePanel ───────────────────────────────────
 
 const CulturePanel: React.FC = () => {
   const [activeTab, setActiveTab] = useState<TabId>('hemoculture');
-  const [showVademecum, setShowVademecum] = useState(false);
-  const [vademecumFilter, setVademecumFilter] = useState('');
-  const [selectedClass, setSelectedClass] = useState<string>('');
+  const [atbFilter, setAtbFilter] = useState('');
+  const [atbClass, setAtbClass] = useState<string>('');
+  const [showAtbPicker, setShowAtbPicker] = useState(true);
 
   // Fix #1: selectores granulares con useShallow para evitar re-renders en cada tick
   // del engine. Sin esto, el componente se re-renderizaba ~60 veces/s durante la
   // simulación porque useMicrobiologyStore() sin selector suscribe al objeto entero.
-  const { cultures, sscBundle, orderCulture, treatmentEfficacy, hiddenPathogenId } =
+  const {
+    cultures, sscBundle, orderCulture, treatmentEfficacy, revealedGerm,
+    activeAntibiotics, startAntibiotic, stopAntibiotic, appropriateCoverage,
+  } =
     useMicrobiologyStore(useShallow(s => ({
-      cultures:          s.cultures,
-      sscBundle:         s.sscBundle,
-      orderCulture:      s.orderCulture,
-      treatmentEfficacy: s.treatmentEfficacy,
-      hiddenPathogenId:  s.hiddenPathogenId,
+      cultures:             s.cultures,
+      sscBundle:            s.sscBundle,
+      orderCulture:         s.orderCulture,
+      treatmentEfficacy:    s.treatmentEfficacy,
+      revealedGerm:         s.revealedGerm,
+      activeAntibiotics:    s.activeAntibiotics,
+      startAntibiotic:      s.startAntibiotic,
+      stopAntibiotic:       s.stopAntibiotic,
+      appropriateCoverage:  s.appropriateCoverage,
     })));
 
   const simElapsed   = useTimeStore(s => s.simulatedElapsed);
   const sepsisActive = usePathologyStore(s => s.sepsis.isActive);
 
-  // ── Cobertura insuficiente: patógeno activo + tratamiento sin eficacia ──────
-  const hasActivePath = hiddenPathogenId !== null && hiddenPathogenId in PATHOGEN_CATALOG;
-  const coverageAlert = sepsisActive && hasActivePath &&
+  // ── Cobertura: usa revealedGerm (visible al usuario) no hiddenPathogenId (oculto)
+  // revealedGerm es null hasta que el cultivo se resuelve → UI muestra "DESCONOCIDO"
+  const hasRevealedPath = revealedGerm !== null && revealedGerm in PATHOGEN_CATALOG;
+  const coverageAlert = sepsisActive && !appropriateCoverage &&
     (treatmentEfficacy === 'mismatch' || treatmentEfficacy === 'none');
-  // Fix #4: si hasActivePath es verdadero, la entrada del catálogo está garantizada —
-  // no mezclar ! y ?. para el mismo acceso.
-  const pathogenLabel = hasActivePath
-    ? PATHOGEN_CATALOG[hiddenPathogenId as string].displayName
-    : '';
+  const pathogenLabel = hasRevealedPath
+    ? PATHOGEN_CATALOG[revealedGerm as string].displayName
+    : sepsisActive ? '⏳ Pendiente de cultivos' : '';
 
   // ── Time-to-Antibiotic ────────────────────────────────────────────────────
   const sepsisAt   = sscBundle.sepsisActivatedAt;
@@ -362,11 +370,38 @@ const CulturePanel: React.FC = () => {
     [activeTab],
   );
 
-  // Fix #3: atbClasses es constante — ahora viene del nivel de módulo (ALL_ATB_CLASSES),
-  // no se recalcula aquí en absoluto.
+  // Fix #3: atbClasses es constante — viene del nivel de módulo.
   const atbClasses = ALL_ATB_CLASSES;
 
-  // useCallback para que handleOrder sea estable entre renders (no recrea la fn)
+  // ATBs filtrados para el selector Sanford
+  const filteredAtbs = useMemo(() => {
+    const q = atbFilter.toLowerCase();
+    return Object.values(ANTIBIOTIC_CATALOG).filter(atb => {
+      const matchClass  = !atbClass || atb.class === atbClass;
+      const matchSearch = !q ||
+        atb.fullName.toLowerCase().includes(q) ||
+        atb.shortName.toLowerCase().includes(q) ||
+        atb.class.toLowerCase().includes(q) ||
+        atb.doseStandard.toLowerCase().includes(q);
+      return matchClass && matchSearch;
+    });
+  }, [atbFilter, atbClass]);
+
+  const activeAtbIds = useMemo(
+    () => new Set(activeAntibiotics.map(a => a.antibioticId)),
+    [activeAntibiotics],
+  );
+
+  const handleToggleAtb = useCallback((atbId: string) => {
+    if (activeAtbIds.has(atbId)) {
+      stopAntibiotic(atbId);
+    } else {
+      if (activeAntibiotics.length >= MAX_ACTIVE_ATB) return; // límite 5
+      startAntibiotic(atbId, simElapsed);
+    }
+  }, [activeAtbIds, activeAntibiotics.length, startAntibiotic, stopAntibiotic, simElapsed]);
+
+  // useCallback para que handleOrder sea estable entre renders
   const handleOrder = useCallback(
     (siteType: CultureSiteType) => orderCulture(siteType, simElapsed),
     [orderCulture, simElapsed],
@@ -462,84 +497,149 @@ const CulturePanel: React.FC = () => {
         </div>
       )}
 
-      {/* ─── Vademécum Toggle ─────────────────────────────────────────────── */}
+      {/* ─── TERAPIA EMPÍRICA — Selector Sanford (máx 5 ATBs) ─────────────── */}
       <div className="shrink-0 border-b border-white/5">
         <button
-          onClick={() => setShowVademecum(v => !v)}
-          className="w-full px-3 py-1.5 text-left text-[10px] font-bold text-purple-300 hover:bg-white/5 transition-colors flex items-center gap-2"
+          type="button"
+          onClick={() => setShowAtbPicker(v => !v)}
+          className="w-full px-3 py-1.5 text-left text-[10px] font-bold text-cyan-300 hover:bg-white/5 transition-colors flex items-center gap-2"
         >
-          <span>📖 Vademécum Antibiótico — Sanford 2025</span>
-          <span className="ml-auto">{showVademecum ? '▲' : '▼'}</span>
+          <span>💊 Terapia Empírica — Guía Sanford 2025</span>
+          <span className="ml-auto text-[9px] text-slate-500">
+            {activeAntibiotics.length}/{MAX_ACTIVE_ATB} activos
+          </span>
+          <span>{showAtbPicker ? '▲' : '▼'}</span>
         </button>
 
-        {showVademecum && (
-          <div className="p-2 space-y-2 max-h-60 overflow-y-auto">
+        {showAtbPicker && (
+          <div className="px-2 pb-2 space-y-2">
+
+            {/* Tags de ATBs activos */}
+            {activeAntibiotics.length > 0 && (
+              <div>
+                <div className="text-[8px] text-slate-500 uppercase tracking-wider mb-1">En infusión:</div>
+                <div className="flex flex-wrap gap-1">
+                  {activeAntibiotics.map(a => {
+                    const def = ANTIBIOTIC_CATALOG[a.antibioticId];
+                    return (
+                      <button
+                        type="button"
+                        key={a.antibioticId}
+                        onClick={() => stopAntibiotic(a.antibioticId)}
+                        title={`Detener ${def?.fullName ?? a.antibioticId} (click para quitar)`}
+                        className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold
+                          bg-cyan-900/40 text-cyan-300 border border-cyan-600/50
+                          hover:bg-red-900/40 hover:text-red-300 hover:border-red-600/50 transition-colors"
+                      >
+                        <span>{def?.shortName ?? a.antibioticId}</span>
+                        <span className="opacity-60">×</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Límite 5 */}
+            {activeAntibiotics.length >= MAX_ACTIVE_ATB && (
+              <div className="text-[9px] text-amber-400 bg-amber-900/20 border border-amber-700/30 rounded px-2 py-1">
+                ⚠️ Máximo {MAX_ACTIVE_ATB} antibióticos simultáneos. Quita uno antes de agregar otro.
+              </div>
+            )}
+
             {/* Filtros */}
             <div className="flex gap-1.5">
               <input
                 type="text"
-                placeholder="Buscar antibiótico..."
-                value={vademecumFilter}
-                onChange={e => setVademecumFilter(e.target.value)}
-                className="flex-1 bg-[#0a1525] border border-white/10 rounded px-2 py-1 text-[10px] text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-600"
+                placeholder="Buscar ATB..."
+                value={atbFilter}
+                onChange={e => setAtbFilter(e.target.value)}
+                className="flex-1 bg-[#0a1525] border border-white/10 rounded px-2 py-1
+                  text-[10px] text-gray-200 placeholder-gray-600
+                  focus:outline-none focus:border-cyan-600"
               />
               <select
-                value={selectedClass}
-                onChange={e => setSelectedClass(e.target.value)}
+                value={atbClass}
+                onChange={e => setAtbClass(e.target.value)}
                 aria-label="Filtrar por clase de antibiótico"
                 title="Clase de antibiótico"
-                className="bg-[#0a1525] border border-white/10 rounded px-1.5 py-1 text-[9px] text-gray-200 focus:outline-none max-w-[110px]"
+                className="bg-[#0a1525] border border-white/10 rounded px-1.5 py-1
+                  text-[9px] text-gray-200 focus:outline-none max-w-[110px]"
               >
                 <option value="">Todas las clases</option>
-                {atbClasses.map(c => (
+                {ALL_ATB_CLASSES.map(c => (
                   <option key={c} value={c}>{c}</option>
                 ))}
               </select>
             </div>
 
-            {/* Tabla vademécum */}
-            <div className="space-y-1">
-              {Object.values(ANTIBIOTIC_CATALOG)
-                .filter(atb => {
-                  const qLower = vademecumFilter.toLowerCase();
-                  const matchSearch = !qLower ||
-                    atb.displayName.toLowerCase().includes(qLower) ||
-                    atb.fullName.toLowerCase().includes(qLower) ||
-                    atb.shortName.toLowerCase().includes(qLower) ||
-                    atb.class.toLowerCase().includes(qLower);
-                  const matchClass = !selectedClass || atb.class === selectedClass;
-                  return matchSearch && matchClass;
-                })
-                .map(atb => (
-                  <div key={atb.id} className="bg-[#0a1525] rounded border border-white/5 p-2">
-                    <div className="flex items-center justify-between mb-1">
-                      <div>
-                        <span className="font-bold text-[10px] text-purple-300">{atb.fullName}</span>
-                        <span className="text-[9px] text-gray-400 ml-1.5">{atb.class}</span>
-                      </div>
-                      <div className="flex gap-1">
-                        <span className="text-[8px] bg-blue-900/30 text-blue-400 px-1 py-0.5 rounded border border-blue-800/30">
-                          {atb.pkpdType === 'time' ? 'T>MIC' : atb.pkpdType === 'auc' ? 'AUC' : 'Cmax'}
+            {/* Lista Sanford — seleccionable */}
+            <div className="max-h-52 overflow-y-auto space-y-1 pr-0.5">
+              {filteredAtbs.map(atb => {
+                const isActive  = activeAtbIds.has(atb.id);
+                const atbData   = activeAntibiotics.find(a => a.antibioticId === atb.id);
+                const disabled  = !isActive && activeAntibiotics.length >= MAX_ACTIVE_ATB;
+                return (
+                  <button
+                    type="button"
+                    key={atb.id}
+                    onClick={() => !disabled && handleToggleAtb(atb.id)}
+                    disabled={disabled}
+                    title={disabled ? 'Límite de 5 ATBs alcanzado' : atb.doseStandard}
+                    className={`w-full text-left p-2 rounded-lg border transition-colors ${
+                      isActive
+                        ? 'bg-cyan-900/40 border-cyan-600/60 text-cyan-100'
+                        : disabled
+                          ? 'bg-slate-900/20 border-slate-700/20 text-slate-600 cursor-not-allowed'
+                          : 'bg-[#0a1525] border-white/5 text-gray-200 hover:border-cyan-700/40 hover:bg-cyan-900/10'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        {/* ON/OFF pill */}
+                        <span className={`shrink-0 text-[8px] font-black px-1.5 py-0.5 rounded ${
+                          isActive
+                            ? 'bg-cyan-600/40 text-cyan-300 border border-cyan-500/40'
+                            : 'bg-slate-700/40 text-slate-500 border border-slate-600/30'
+                        }`}>
+                          {isActive ? 'ON' : 'OFF'}
                         </span>
-                        <span className="text-[8px] text-gray-500 px-1 py-0.5">
-                          CNS: {atb.cnsPermeability === 'good' ? '✅' : atb.cnsPermeability === 'moderate' ? '⚡' : atb.cnsPermeability === 'none' ? '❌' : '⚠️'}
-                        </span>
-                        {atb.nephrotoxic && (
-                          <span className="text-[8px] bg-red-900/30 text-red-400 px-1 py-0.5 rounded">⚠️ Nefro</span>
-                        )}
+                        <span className="font-bold text-[10px] truncate">{atb.fullName}</span>
                       </div>
+                      <span className="shrink-0 text-[8px] text-slate-400 ml-1">{atb.shortName}</span>
                     </div>
-                    <div className="text-[9px] text-gray-300 mb-1">{atb.doseStandard}</div>
-                    {atb.notes.length > 0 && (
-                      <div className="space-y-0.5">
-                        {atb.notes.map((note, i) => (
-                          <div key={i} className="text-[9px] text-amber-400/70">{note}</div>
-                        ))}
+
+                    <div className="flex items-center gap-2 mt-0.5">
+                      <span className="text-[8px] text-slate-400 truncate flex-1">{atb.doseStandard}</span>
+                      <span className="shrink-0 text-[8px] text-slate-500">{atb.class}</span>
+                    </div>
+
+                    {/* Barra PK si activo */}
+                    {isActive && atbData && (
+                      <div className="mt-1 flex items-center gap-2">
+                        <div className="flex-1 h-0.5 bg-slate-700/60 rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-cyan-500/70 rounded-full transition-all"
+                            style={{ width: `${Math.min(100, (atbData.serumConcentration / atb.peakConcentration) * 100)}%` }}
+                          />
+                        </div>
+                        <span className="text-[7px] text-slate-500 shrink-0">
+                          {atbData.serumConcentration.toFixed(1)}/{atb.peakConcentration} μg/mL
+                        </span>
                       </div>
                     )}
-                  </div>
-                ))}
+
+                    {/* Notas clínicas clave */}
+                    {atb.notes.length > 0 && (
+                      <div className="mt-0.5 text-[8px] text-amber-400/70 truncate">
+                        {atb.notes[0]}
+                      </div>
+                    )}
+                  </button>
+                );
+              })}
             </div>
+
           </div>
         )}
       </div>
@@ -549,6 +649,7 @@ const CulturePanel: React.FC = () => {
         <div className="flex min-w-max">
           {PANEL_TABS.map(tab => (
             <button
+              type="button"
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
               className={`px-2.5 py-1.5 text-[9px] font-bold whitespace-nowrap transition-colors flex items-center gap-1 border-b-2 ${

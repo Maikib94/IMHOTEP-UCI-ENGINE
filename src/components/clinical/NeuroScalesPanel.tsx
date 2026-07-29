@@ -1,7 +1,11 @@
-// src/components/clinical/NeuroScalesPanel.tsx — RASS / GCS / CPOT (solo display)
+// src/components/clinical/NeuroScalesPanel.tsx — RASS / GCS / CPOT + PIC catheter
+// Hawryluk GWJ et al. ICM 2022;48:649-66 — ICP catheter indications
+// Robba C et al. Lancet Neurol 2021 (SYNAPSE-ICU)
 import React from 'react';
 import { usePharmacologyStore } from '../../store/usePharmacologyStore';
 import { usePatientStore } from '../../store/usePatientStore';
+import { useScenarioStore } from '../../store/useScenarioStore';
+import { useMonitoringStore } from '../../store/useMonitoringStore';
 import { ProgressBar } from './drugControls';
 
 function computeRASS(sedation: number, analgesia: number): number {
@@ -63,6 +67,13 @@ function computeCPOT(analgesia: number, sedation: number, nmba: number): number 
 export default function NeuroScalesPanel() {
   const { sedation, analgesia, nmba } = usePharmacologyStore(s => s.systemicEffects);
   const gcs = usePatientStore(s => s.vitals.gcs);
+
+  // ── Catéter PIC: solo visible si neuro + indicado por escenario ──────────
+  const cat          = useScenarioStore(s => s.activeScenario?.category);
+  const hieIndicated = useScenarioStore(s => s.activeScenario?.icpCatheterRequired ?? false);
+  const placed       = useMonitoringStore(s => s.icpCatheterPlaced);
+  const placeICP     = useMonitoringStore(s => s.placeICPCatheter);
+  const showIcpButton = cat === 'neuro' && hieIndicated;
 
   const rass      = computeRASS(sedation, analgesia);
   const rassPct   = ((rass + 5) / 9) * 100;
@@ -136,6 +147,47 @@ export default function NeuroScalesPanel() {
           />
         )}
       </div>
+
+      {/* ── Catéter PIC — solo si neuro + indicación HIE ─────────────────── */}
+      {showIcpButton && (
+        <div className="bg-[#0f172a] rounded-lg border border-white/5 p-2">
+          <div className="flex items-center justify-between mb-1.5">
+            <span className="text-[0.5rem] font-black uppercase tracking-widest text-purple-400">
+              Monitoreo PIC
+            </span>
+            {placed && (
+              <span className="text-[0.42rem] font-bold text-emerald-400 font-mono">
+                ✓ COLOCADO
+              </span>
+            )}
+          </div>
+          {!placed ? (
+            <button
+              type="button"
+              onClick={() => placeICP(true)}
+              className="w-full py-1.5 rounded border border-purple-500/50 bg-purple-900/25 text-purple-300 text-[0.5rem] font-bold uppercase tracking-wider cursor-pointer hover:bg-purple-800/35 transition-all"
+            >
+              COLOCAR CATÉTER PIC
+            </button>
+          ) : (
+            <div className="space-y-1">
+              <div className="text-[0.42rem] text-slate-400">
+                Curva P1/P2/P3 activa en monitor principal
+              </div>
+              <button
+                type="button"
+                onClick={() => placeICP(false)}
+                className="text-[0.42rem] text-red-400 hover:text-red-300 cursor-pointer"
+              >
+                Retirar catéter
+              </button>
+            </div>
+          )}
+          <div className="text-[0.38rem] text-slate-600 mt-1">
+            Indicado: GCS≤8 + TC anormal (Hawryluk ICM 2022; BTF clase IIB)
+          </div>
+        </div>
+      )}
     </div>
   );
 }

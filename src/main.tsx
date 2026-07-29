@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client';
 import './index.css';
 import MonitorApp from './MonitorApp';
 import { InstructorPanel } from './components/InstructorPanel';
+import { LanguageProvider } from './i18n/LanguageContext';
 
 interface ErrorBoundaryState { hasError: boolean; error: Error | null }
 
@@ -64,9 +65,11 @@ class ErrorBoundary extends React.Component<
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <ErrorBoundary>
-      <MonitorApp />
-      <InstructorPanel />
-    </ErrorBoundary>
+    <LanguageProvider>
+      <ErrorBoundary>
+        <MonitorApp />
+        <InstructorPanel />
+      </ErrorBoundary>
+    </LanguageProvider>
   </React.StrictMode>
 );

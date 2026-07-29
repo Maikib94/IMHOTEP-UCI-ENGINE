@@ -1,32 +1,150 @@
 // src/components/ClinicalControlPanel.tsx
-// Layout de acordeón vertical — todas las categorías clínicas colapsables.
-// Estado de expansión persistido en usePatientStore.UIState.
+// Layout de acordeón vertical — 5 categorías funcionales colapsables.
+// Orden: HEMODINAMIA → SOPORTE RESPIRATORIO → SOPORTE NEUROLÓGICO
+//        → INFECTOLOGÍA → FÁRMACOS ESPECIALES
+// Estado de expansión persistido en usePatientStore.accordionExpanded.
 
-import React from 'react';
+import React, { useState } from 'react';
 import { usePharmacologyStore, type DrugId } from '../store/usePharmacologyStore';
-import { usePatientStore, type RespiratorySupport } from '../store/usePatientStore';
 import { usePrognosisStore } from '../store/usePrognosisStore';
+import { useUIStore } from '../store/useUIStore';
+import { useMicrobiologyStore } from '../store/useMicrobiologyStore';
+import { useTimeStore } from '../store/useTimeStore';
+import { DRUG_CATALOG } from '../store/usePharmacologyStore';
+import RespiratorySupportSelector from './RespiratorySupportSelector';
+import { useLanguage } from '../i18n/LanguageContext';
+import { PharmacyStorePanel } from './PharmacyStorePanel';
 
 import AccordionSection          from './ui/AccordionSection';
-import VasopressorControls        from './clinical/VasopressorControls';
-import InotropeControls           from './clinical/InotropeControls';
-import AntiarrhythmicControls     from './clinical/AntiarrhythmicControls';
-import AnalgesiaControls          from './clinical/AnalgesiaControls';
-import SedationControls           from './clinical/SedationControls';
-import ParalysisControls          from './clinical/ParalysisControls';
-import NeuroScalesPanel           from './clinical/NeuroScalesPanel';
-import QuickARMPanel              from './QuickARMPanel';
-import CulturePanel               from './CulturePanel';
+import VasopressorControls       from './clinical/VasopressorControls';
+import InotropeControls          from './clinical/InotropeControls';
+import AntiarrhythmicControls    from './clinical/AntiarrhythmicControls';
+import AnalgesiaControls         from './clinical/AnalgesiaControls';
+import SedationControls          from './clinical/SedationControls';
+import ParalysisControls         from './clinical/ParalysisControls';
+import NeuroScalesPanel          from './clinical/NeuroScalesPanel';
+import DiureticControls          from './clinical/DiureticControls';
+import CorticoidControls         from './clinical/CorticoidControls';
+import AerosolControls           from './clinical/AerosolControls';
+import InsulinHGTControls        from './clinical/InsulinHGTControls';
+import { AntihypertensiveControls }     from './clinical/AntihypertensiveControls';
+import { OralAntiarrhythmicControls }   from './clinical/OralAntiarrhythmicControls';
+import QuickARMPanel             from './QuickARMPanel';
+import CulturePanel              from './CulturePanel';
+import SpecialDrugsPanel         from './clinical/SpecialDrugsPanel';
 
 // ─── Badge helper: cuenta drogas activas de una lista ────────────────────────
 
 function useDrugBadge(drugs: DrugId[]): string | undefined {
-  const rates = usePharmacologyStore(s => s.infusionRates);
+  const rates  = usePharmacologyStore(s => s.infusionRates);
   const active = drugs.filter(d => (rates[d] ?? 0) > 0).length;
   return active > 0 ? `${active} activa${active > 1 ? 's' : ''}` : undefined;
 }
 
-// ─── Sección INFECTO/LAB (ISDA + cultivos) ───────────────────────────────────
+// ─── Agenda unificada de dosis programadas ───────────────────────────────────
+
+function ticksToHM(ticks: number): string {
+  const absS = Math.abs(ticks);
+  const h    = Math.floor(absS / 3600);
+  const m    = Math.floor((absS % 3600) / 60);
+  return `${h}h ${m}min`;
+}
+
+function DoseAgendaOverview() {
+  const infusionRates   = usePharmacologyStore(s => s.infusionRates);
+  const scheduled       = usePharmacologyStore(s => s.scheduledDoses);
+  const cancelScheduled = usePharmacologyStore(s => s.cancelScheduledDose);
+  const bolusHistory    = usePharmacologyStore(s => s.bolusHistory);
+  const currentTick     = useTimeStore(s => s.ticks);
+
+  const activeInfusions = Object.entries(infusionRates)
+    .filter(([, r]) => r > 0)
+    .sort(([a], [b]) => a.localeCompare(b)) as [DrugId, number][];
+
+  const activeDoses = scheduled.filter(s => s.active);
+
+  const lastDayTick = currentTick - 24 * 3600;
+  const recentBoluses = bolusHistory.filter(b => b.tickAt >= lastDayTick).slice(-30).reverse();
+
+  return (
+    <div className="p-2 space-y-3">
+
+      {/* ── INFUSIONES ACTIVAS ────────────────────────────────────────── */}
+      {activeInfusions.length > 0 && (
+        <div>
+          <div className="text-[0.44rem] font-black text-cyan-400 uppercase tracking-widest mb-1">
+            Infusiones activas ({activeInfusions.length})
+          </div>
+          <div className="space-y-0.5">
+            {activeInfusions.map(([drug, rate]) => (
+              <div key={drug} className="flex justify-between items-center px-2 py-0.5 rounded bg-cyan-900/10 border border-cyan-800/20 text-[0.44rem]">
+                <span className="font-mono text-cyan-300">{DRUG_CATALOG[drug]?.shortName ?? drug}</span>
+                <span className="font-mono text-slate-300">{rate.toFixed(2)} {DRUG_CATALOG[drug]?.inputUnit}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── PROGRAMADAS (próximas 24h) ─────────────────────────────────── */}
+      {activeDoses.length > 0 && (
+        <div>
+          <div className="text-[0.44rem] font-black text-violet-400 uppercase tracking-widest mb-1">
+            📅 Programadas ({activeDoses.length})
+          </div>
+          <div className="space-y-0.5">
+            {activeDoses.map(s => {
+              const drugLabel = DRUG_CATALOG[s.drug]?.shortName ?? s.drug;
+              const ticksLeft = s.nextTickAt - currentTick;
+              const overdue   = ticksLeft < 0;
+              return (
+                <div key={s.id} className={`flex justify-between items-center px-2 py-1 rounded text-[0.44rem] border ${
+                  overdue ? 'bg-amber-900/15 border-amber-700/30' : 'bg-slate-800/40 border-white/5'
+                }`}>
+                  <span className="font-mono text-slate-200 truncate">
+                    {drugLabel} {s.doseMg}mg c/{s.intervalH}h
+                  </span>
+                  <span className={`font-mono shrink-0 ml-2 ${overdue ? 'text-amber-400' : 'text-slate-400'}`}>
+                    {overdue ? `+${ticksToHM(-ticksLeft)} tarde` : `→${ticksToHM(ticksLeft)}`}
+                  </span>
+                  <button type="button" onClick={() => cancelScheduled(s.id)}
+                    className="text-red-400 text-[0.44rem] cursor-pointer ml-1.5 shrink-0">✕</button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* ── HISTORIAL últimas 24h ──────────────────────────────────────── */}
+      {recentBoluses.length > 0 && (
+        <div>
+          <div className="text-[0.44rem] font-black text-slate-400 uppercase tracking-widest mb-1">
+            Historial 24h ({recentBoluses.length})
+          </div>
+          <div className="space-y-0.5 max-h-24 overflow-y-auto">
+            {recentBoluses.map((b, i) => {
+              const ageH = Math.round((currentTick - b.tickAt) / 3600);
+              return (
+                <div key={i} className="flex justify-between items-center px-2 py-0.5 rounded bg-black/20 border border-white/5 text-[0.42rem]">
+                  <span className="font-mono text-slate-400">{DRUG_CATALOG[b.drug]?.shortName ?? b.drug}</span>
+                  <span className="font-mono text-slate-500">{b.doseMg}mg {b.route}</span>
+                  <span className="font-mono text-slate-600">-{ageH}h</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {activeInfusions.length === 0 && activeDoses.length === 0 && recentBoluses.length === 0 && (
+        <div className="text-[0.44rem] text-slate-600 italic text-center py-2">Sin actividad farmacológica</div>
+      )}
+    </div>
+  );
+}
+
+// ─── Sección INFECTOLOGÍA (ISDA + cultivos) ──────────────────────────────────
 
 function InfectoLabSection() {
   const prognosisActive   = usePrognosisStore(s => s.isActive);
@@ -35,10 +153,18 @@ function InfectoLabSection() {
   const outcome           = usePrognosisStore(s => s.outcome);
   const activatePrognosis   = usePrognosisStore(s => s.activate);
   const deactivatePrognosis = usePrognosisStore(s => s.deactivate);
+  const orderCulture       = useMicrobiologyStore(s => s.orderCulture);
+  const cultures           = useMicrobiologyStore(s => s.cultures);
+  const simElapsed         = useTimeStore(s => s.simulatedElapsed);
+  const urinePending = cultures.some(
+    c => (c.siteType === 'urine_catheter' || c.siteType === 'urine_midstream') && c.status === 'pending'
+  );
+  const urineResult = cultures.find(
+    c => (c.siteType === 'urine_catheter' || c.siteType === 'urine_midstream') && c.result !== null
+  );
 
   return (
     <div className="p-3 space-y-3">
-      {/* Motor ISDA */}
       <div className="bg-[#0f172a] rounded-xl border border-white/5 p-3">
         <div className="flex items-center justify-between mb-2 border-b border-slate-800 pb-2">
           <div className="flex items-center gap-2">
@@ -109,7 +235,45 @@ function InfectoLabSection() {
         )}
       </div>
 
-      {/* Panel de cultivos */}
+      {/* ── UROCULTIVOS ──────────────────────────────────────────────────── */}
+      <div className="bg-[#0f172a] rounded-xl border border-white/5 p-2">
+        <div className="flex items-center justify-between mb-2">
+          <div className="text-[0.5rem] font-black text-amber-400 uppercase tracking-widest">
+            🧪 Urocultivos
+          </div>
+          {urineResult?.result?.isPositive && (
+            <span className="text-[0.42rem] text-emerald-400 font-mono font-bold">
+              ✓ {urineResult.result.pathogenName}
+            </span>
+          )}
+        </div>
+        {urinePending ? (
+          <div className="text-[0.48rem] text-amber-300 font-mono animate-pulse">
+            ⏳ Procesando… (24-48h sim)
+          </div>
+        ) : (
+          <div className="flex gap-1">
+            <button
+              type="button"
+              onClick={() => orderCulture('urine_catheter', simElapsed)}
+              className="flex-1 py-1 rounded text-[0.48rem] font-bold cursor-pointer border border-amber-600/40 bg-amber-900/20 text-amber-300 hover:bg-amber-800/30 transition-all"
+            >
+              Sonda Foley
+            </button>
+            <button
+              type="button"
+              onClick={() => orderCulture('urine_midstream', simElapsed)}
+              className="flex-1 py-1 rounded text-[0.48rem] font-bold cursor-pointer border border-amber-600/40 bg-amber-900/20 text-amber-300 hover:bg-amber-800/30 transition-all"
+            >
+              Chorro Medio
+            </button>
+          </div>
+        )}
+        <div className="text-[0.38rem] text-slate-600 mt-1">
+          Wen Y et al. PLoS ONE 2025 — E. coli 51.6%, K. pneumoniae 11.9%
+        </div>
+      </div>
+
       <div className="h-[280px] min-h-0">
         <CulturePanel />
       </div>
@@ -119,156 +283,190 @@ function InfectoLabSection() {
 
 // ─── Componente principal ─────────────────────────────────────────────────────
 
-export default function ClinicalControlPanel() {
-  const respiratoryDevice     = usePatientStore(s => s.respiratoryDevice);
-  const setRespiratorySupport = usePatientStore(s => s.setRespiratorySupport);
-  const setRespiratoryDevice  = usePatientStore(s => s.setRespiratoryDevice);
-  const currentSupport = respiratoryDevice.support;
+interface ClinicalControlPanelProps {
+  onOpenVent?: () => void;
+}
 
-  // Badges por categoría de droga
-  const vasoBadge = useDrugBadge(['noradrenaline', 'adrenaline', 'vasopressin', 'methylene_blue']);
-  const inoBadge  = useDrugBadge(['dobutamine', 'dopamine', 'milrinone', 'levosimendan']);
-  const antiBadge = useDrugBadge(['amiodarone', 'digoxin']);
-  const analgBadge = useDrugBadge(['morphine', 'fentanyl', 'remifentanil']);
-  const sedBadge  = useDrugBadge(['propofol', 'midazolam', 'ketamine', 'dexmedetomidine', 'thiopental']);
-  const bnmBadge  = useDrugBadge(['rocuronium', 'cisatracurium', 'atracurium', 'pancuronium']);
+export default function ClinicalControlPanel({ onOpenVent }: ClinicalControlPanelProps) {
+  const [showPharmacy, setShowPharmacy] = useState(false);
+  const { doseDisplayMode, setDoseDisplayMode } = useLanguage();
+
+  // ── Badges por grupo de drogas ──────────────────────────────────────────────
+  const hemoBadge  = useDrugBadge(['noradrenaline','adrenaline','vasopressin','methylene_blue',
+                                    'dobutamine','dopamine','milrinone','levosimendan',
+                                    'amiodarone','digoxin','esmolol','metoprolol_iv','diltiazem_iv']);
+  const neuroBadge = useDrugBadge(['morphine','fentanyl','remifentanil',
+                                    'propofol','midazolam','ketamine','dexmedetomidine','thiopental',
+                                    'rocuronium','cisatracurium','atracurium','pancuronium']);
+  const farmBadge  = useDrugBadge(['furosemide_iv','furosemide_oral',
+                                    'hydrocortisone','methylprednisolone','dexamethasone',
+                                    'salbutamol_neb','ipratropium_neb',
+                                    'insulin_regular_iv','insulin_nph','insulin_glargine']);
+
+  const unitDisplay    = useUIStore(s => s.unitDisplay);
+  const toggleUnit     = useUIStore(s => s.toggleUnitDisplay);
 
   return (
     <div className="w-full h-full flex flex-col bg-slate-950 text-white overflow-hidden rounded-xl">
 
-      {/* ── Soporte Respiratorio Escalonado (fijo, no acordeón) ── */}
-      <div className="shrink-0 px-3 pt-2 pb-1 space-y-1.5 border-b border-white/5">
-        <div className="text-[0.42rem] font-black text-slate-500 tracking-widest uppercase mb-1">Soporte Respiratorio</div>
-        {([
-          { key: 'room_air',      label: 'Aire Ambiental',          color: 'text-slate-400',   border: 'border-slate-700',  bg: 'bg-slate-800/40'   },
-          { key: 'nasal_cannula', label: 'Cánula Nasal',            color: 'text-sky-400',     border: 'border-sky-700',    bg: 'bg-sky-900/30'     },
-          { key: 'simple_mask',   label: 'Máscara Simple',          color: 'text-blue-400',    border: 'border-blue-700',   bg: 'bg-blue-900/30'    },
-          { key: 'venturi',       label: 'Máscara Venturi',         color: 'text-indigo-400',  border: 'border-indigo-700', bg: 'bg-indigo-900/30'  },
-          { key: 'hfnc',          label: 'CNAF (Alto Flujo)',       color: 'text-violet-400',  border: 'border-violet-700', bg: 'bg-violet-900/30'  },
-          { key: 'arm',           label: 'ARM (Ventilación Mec.)', color: 'text-emerald-400', border: 'border-emerald-600', bg: 'bg-emerald-900/40' },
-        ] as { key: RespiratorySupport; label: string; color: string; border: string; bg: string }[]).map(({ key, label, color, border, bg }) => {
-          const isActive = currentSupport === key;
-          return (
-            <button
-              key={key}
-              type="button"
-              onClick={() => setRespiratorySupport(key)}
-              className={`w-full py-1.5 px-2.5 rounded-lg font-bold text-[0.5rem] tracking-wider uppercase transition-all duration-200 border flex items-center gap-2 ${
-                isActive ? `${bg} ${border} ${color} shadow-sm` : 'bg-slate-900/30 border-slate-800 text-slate-600 hover:text-slate-400'
-              }`}
-            >
-              <span className={`w-2 h-2 rounded-full flex-shrink-0 ${isActive ? 'bg-current animate-pulse' : 'bg-slate-700'}`} />
-              {label}
-            </button>
-          );
-        })}
+      {/* ── Header con toggle de unidades y botón Farmacia ── */}
+      <div className="flex items-center justify-between px-3 py-1.5 border-b border-white/5 shrink-0 gap-1">
+        <span className="text-[0.45rem] font-black text-slate-500 tracking-widest uppercase shrink-0">Panel Clínico</span>
 
-        {/* Controles específicos del dispositivo */}
-        {currentSupport === 'nasal_cannula' && (
-          <div className="bg-sky-900/20 border border-sky-800/50 rounded-lg p-2 mt-1">
-            <div className="text-[0.42rem] text-sky-400 font-bold mb-1">FLUJO CÁNULA</div>
-            <div className="flex items-center gap-2">
-              <input type="range" min={1} max={6} step={1} value={respiratoryDevice.cannulaFlow}
-                title="Flujo cánula nasal"
-                onChange={e => setRespiratoryDevice({ cannulaFlow: Number(e.target.value) })}
-                className="flex-1" style={{ accentColor: '#38bdf8' }} />
-              <span className="text-sky-300 font-mono text-xs font-bold w-8">{respiratoryDevice.cannulaFlow} L</span>
-            </div>
-            <div className="text-[0.38rem] text-sky-700 mt-0.5">
-              FiO₂ ≈ {Math.round((0.21 + 0.04 * respiratoryDevice.cannulaFlow) * 100)}%
-            </div>
+        {/* Botón Farmacia */}
+        <button
+          type="button"
+          onClick={() => setShowPharmacy(true)}
+          className="flex items-center gap-1 px-1.5 py-0.5 rounded border border-violet-700/40 bg-violet-900/15 text-violet-400 text-[0.42rem] font-bold cursor-pointer hover:bg-violet-800/25 transition-all shrink-0"
+          title="Calculador de diluciones"
+        >
+          <span>💊</span>
+          <span>Farmacia</span>
+        </button>
+
+        {/* Toggle unidades: nativa / ambas / cc/h */}
+        <button
+          type="button"
+          onClick={() => {
+            const next = doseDisplayMode === 'native' ? 'both' : doseDisplayMode === 'both' ? 'cch' : 'native';
+            setDoseDisplayMode(next);
+            toggleUnit(); // keep UIStore in sync
+          }}
+          title="Alternar modo display: nativo → ambos → cc/h"
+          className="flex items-center gap-1 cursor-pointer shrink-0"
+        >
+          <span className={`text-[0.42rem] font-bold transition-colors ${doseDisplayMode === 'native' ? 'text-cyan-300' : 'text-slate-500'}`}>MÉD</span>
+          <div className="relative w-7 h-3.5 rounded-full bg-slate-700">
+            <span className={`absolute top-0.5 w-2.5 h-2.5 rounded-full bg-cyan-400 transition-all duration-200 ${
+              doseDisplayMode === 'cch' ? 'left-[14px]' : doseDisplayMode === 'both' ? 'left-[7px]' : 'left-0.5'
+            }`} />
           </div>
-        )}
-        {currentSupport === 'venturi' && (
-          <div className="bg-indigo-900/20 border border-indigo-800/50 rounded-lg p-2 mt-1">
-            <div className="text-[0.42rem] text-indigo-400 font-bold mb-1.5">FiO₂ VENTURI</div>
-            <div className="flex flex-wrap gap-1">
-              {[0.24, 0.28, 0.31, 0.35, 0.40, 0.60].map(fio2 => (
-                <button key={fio2} type="button"
-                  onClick={() => setRespiratoryDevice({ venturiFiO2: fio2 })}
-                  className={`px-1.5 py-0.5 text-[0.42rem] font-bold rounded border font-mono cursor-pointer ${
-                    respiratoryDevice.venturiFiO2 === fio2
-                      ? 'bg-indigo-700 border-indigo-400 text-white'
-                      : 'bg-slate-800 border-slate-700 text-slate-400'
-                  }`}
-                >{Math.round(fio2 * 100)}%</button>
-              ))}
-            </div>
-          </div>
-        )}
-        {currentSupport === 'hfnc' && (
-          <div className="bg-violet-900/20 border border-violet-800/50 rounded-lg p-2 mt-1 space-y-1.5">
-            <div className="text-[0.42rem] text-violet-400 font-bold">CNAF — PARÁMETROS</div>
-            <div>
-              <div className="flex justify-between mb-0.5">
-                <span className="text-[0.38rem] text-violet-400">Flujo</span>
-                <span className="text-[0.42rem] text-violet-300 font-mono font-bold">{respiratoryDevice.hfncFlow} L/min</span>
-              </div>
-              <input type="range" min={20} max={60} step={5} value={respiratoryDevice.hfncFlow}
-                title="Flujo CNAF"
-                onChange={e => setRespiratoryDevice({ hfncFlow: Number(e.target.value) })}
-                className="w-full" style={{ accentColor: '#a78bfa' }} />
-            </div>
-            <div>
-              <div className="flex justify-between mb-0.5">
-                <span className="text-[0.38rem] text-violet-400">FiO₂</span>
-                <span className="text-[0.42rem] text-violet-300 font-mono font-bold">{Math.round(respiratoryDevice.hfncFiO2 * 100)}%</span>
-              </div>
-              <input type="range" min={21} max={100} step={1} value={Math.round(respiratoryDevice.hfncFiO2 * 100)}
-                title="FiO2 CNAF"
-                onChange={e => setRespiratoryDevice({ hfncFiO2: Number(e.target.value) / 100 })}
-                className="w-full" style={{ accentColor: '#a78bfa' }} />
-            </div>
-          </div>
-        )}
+          <span className={`text-[0.42rem] font-bold transition-colors ${doseDisplayMode === 'cch' ? 'text-cyan-300' : 'text-slate-500'}`}>CC/H</span>
+        </button>
       </div>
+
+      {/* Pharmacy modal */}
+      <PharmacyStorePanel open={showPharmacy} onClose={() => setShowPharmacy(false)} />
 
       {/* ── Acordeón de secciones clínicas ── */}
       <div className="flex-1 overflow-y-auto custom-scrollbar">
 
-        <AccordionSection id="drugs-vasopressors" title="VASOPRESORES"
-          badge={vasoBadge} dotColor="#dc2626" accentColor="#ef4444">
-          <VasopressorControls />
+        {/* 1. HEMODINAMIA — vasopresores + inotrópicos + antiarrítmicos */}
+        <AccordionSection
+          id="hemodynamics"
+          title="HEMODINAMIA"
+          badge={hemoBadge}
+          dotColor="#ef4444"
+          accentColor="#f87171"
+          defaultExpanded
+        >
+          <AccordionSection id="drugs-vasopressors" title="VASOPRESORES"
+            dotColor="#dc2626" accentColor="#ef4444">
+            <VasopressorControls />
+          </AccordionSection>
+
+          <AccordionSection id="drugs-inotropes" title="INOTRÓPICOS"
+            dotColor="#f97316" accentColor="#fb923c">
+            <InotropeControls />
+          </AccordionSection>
+
+          <AccordionSection id="drugs-antiarrhythmics" title="ANTIARRÍTMICOS"
+            dotColor="#8b5cf6" accentColor="#a78bfa">
+            <AntiarrhythmicControls />
+          </AccordionSection>
         </AccordionSection>
 
-        <AccordionSection id="drugs-inotropes" title="INOTRÓPICOS"
-          badge={inoBadge} dotColor="#f97316" accentColor="#fb923c">
-          <InotropeControls />
+        {/* 2. SOPORTE RESPIRATORIO — justo debajo de HEMODINAMIA */}
+        <AccordionSection
+          id="resp-support"
+          title="SOPORTE RESPIRATORIO"
+          dotColor="#34d399"
+          accentColor="#6ee7b7"
+          defaultExpanded
+        >
+          <RespiratorySupportSelector onOpenVent={onOpenVent} />
+          <AccordionSection id="arm-quick" title="ACCESO RÁPIDO ARM"
+            dotColor="#34d399" accentColor="#6ee7b7">
+            <QuickARMPanel />
+          </AccordionSection>
         </AccordionSection>
 
-        <AccordionSection id="drugs-antiarrhythmics" title="ANTIARRÍTMICOS"
-          badge={antiBadge} dotColor="#8b5cf6" accentColor="#a78bfa">
-          <AntiarrhythmicControls />
+        {/* 3. SOPORTE NEUROLÓGICO — analgesia + sedación + BNM + neuro */}
+        <AccordionSection
+          id="neuro-support"
+          title="SOPORTE NEUROLÓGICO"
+          badge={neuroBadge}
+          dotColor="#eab308"
+          accentColor="#facc15"
+        >
+          <AccordionSection id="drugs-analgesia" title="ANALGESIA"
+            dotColor="#3b82f6" accentColor="#60a5fa">
+            <AnalgesiaControls />
+          </AccordionSection>
+
+          <AccordionSection id="drugs-sedation" title="SEDACIÓN"
+            dotColor="#eab308" accentColor="#facc15">
+            <SedationControls />
+          </AccordionSection>
+
+          <AccordionSection id="drugs-bnm" title="PARÁLISIS BNM"
+            dotColor="#10b981" accentColor="#34d399">
+            <ParalysisControls />
+          </AccordionSection>
+
+          <AccordionSection id="clinical-neuro" title="MONITOREO NEURO"
+            dotColor="#22d3ee" accentColor="#67e8f9">
+            <NeuroScalesPanel />
+          </AccordionSection>
         </AccordionSection>
 
-        <AccordionSection id="drugs-analgesia" title="ANALGESIA"
-          badge={analgBadge} dotColor="#3b82f6" accentColor="#60a5fa">
-          <AnalgesiaControls />
-        </AccordionSection>
+        {/* 5. FÁRMACOS ESPECIALES — diuréticos + corticoides + aerosoles + insulina */}
+        <AccordionSection
+          id="farmacos-especiales"
+          title="FÁRMACOS ESPECIALES"
+          badge={farmBadge}
+          dotColor="#06b6d4"
+          accentColor="#22d3ee"
+        >
+          <AccordionSection id="farmacos-diureticos" title="DIURÉTICOS"
+            dotColor="#22d3ee" accentColor="#67e8f9">
+            <DiureticControls />
+          </AccordionSection>
 
-        <AccordionSection id="drugs-sedation" title="SEDACIÓN"
-          badge={sedBadge} dotColor="#eab308" accentColor="#facc15">
-          <SedationControls />
-        </AccordionSection>
+          <AccordionSection id="farmacos-corticoides" title="CORTICOIDES"
+            dotColor="#f59e0b" accentColor="#fbbf24">
+            <CorticoidControls />
+          </AccordionSection>
 
-        <AccordionSection id="drugs-bnm" title="PARÁLISIS BNM"
-          badge={bnmBadge} dotColor="#10b981" accentColor="#34d399">
-          <ParalysisControls />
-        </AccordionSection>
+          <AccordionSection id="farmacos-aerosoles" title="AEROSOLES"
+            dotColor="#34d399" accentColor="#6ee7b7">
+            <AerosolControls />
+          </AccordionSection>
 
-        <AccordionSection id="clinical-neuro" title="MONITOREO NEURO"
-          dotColor="#22d3ee" accentColor="#67e8f9">
-          <NeuroScalesPanel />
-        </AccordionSection>
+          <AccordionSection id="farmacos-insulina" title="INSULINA Y HGT"
+            dotColor="#a78bfa" accentColor="#c4b5fd">
+            <InsulinHGTControls />
+          </AccordionSection>
 
-        <AccordionSection id="infecto-lab" title="INFECTO / LAB"
-          dotColor="#f43f5e" accentColor="#fb7185">
-          <InfectoLabSection />
-        </AccordionSection>
+          <AccordionSection id="farmacos-hiperosmolar" title="HIPEROSMOLAR / ESPECIALES"
+            dotColor="#a78bfa" accentColor="#c4b5fd">
+            <SpecialDrugsPanel />
+          </AccordionSection>
 
-        <AccordionSection id="arm-quick" title="ACCESO RÁPIDO ARM"
-          dotColor="#34d399" accentColor="#6ee7b7">
-          <QuickARMPanel />
+          <AccordionSection id="farmacos-antihipertensivos" title="ANTIHIPERTENSIVOS VO"
+            dotColor="#38bdf8" accentColor="#7dd3fc">
+            <AntihypertensiveControls />
+          </AccordionSection>
+
+          <AccordionSection id="farmacos-antiarrit-oral" title="ANTIARRÍTMICOS VO"
+            dotColor="#f59e0b" accentColor="#fbbf24">
+            <OralAntiarrhythmicControls />
+          </AccordionSection>
+
+          <AccordionSection id="farmacos-agenda" title="AGENDA DE DOSIS"
+            dotColor="#a78bfa" accentColor="#c4b5fd">
+            <DoseAgendaOverview />
+          </AccordionSection>
         </AccordionSection>
 
       </div>

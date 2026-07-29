@@ -9,10 +9,12 @@
 // Bonus:   Agrupación fisiológica jerárquica dentro de la tabla
 
 import React, { useState, useMemo } from 'react';
-import { usePatientStore } from '../store/usePatientStore';
-import { useTimeStore }    from '../store/useTimeStore';
-import { LabEngine }       from '../core/LabEngine';
+import { usePatientStore }  from '../store/usePatientStore';
+import { useTimeStore }     from '../store/useTimeStore';
+import { useScenarioStore } from '../store/useScenarioStore';
+import { LabEngine }        from '../core/LabEngine';
 import type { LabOrder }   from '../store/usePatientStore';
+import LabPanelClinicalDay from './LabPanelClinicalDay';
 
 // ── Tipografía ────────────────────────────────────────────────────────────────
 const MONO = "'JetBrains Mono', monospace";
@@ -119,10 +121,11 @@ const COLS_PER_PAGE = 5;
 // Funciones puras de análisis clínico
 // ─────────────────────────────────────────────────────────────────────────────
 
-function fmtTime(ticks: number): string {
-  const h = Math.floor(ticks / 3600) % 24;
-  const m = Math.floor((ticks % 3600) / 60);
-  return 'D' + (Math.floor(ticks / 86400) + 1)
+function fmtTime(ticks: number, startTick = 0): string {
+  const elapsed = Math.max(0, ticks - startTick);
+  const h = Math.floor(elapsed / 3600) % 24;
+  const m = Math.floor((elapsed % 3600) / 60);
+  return 'D' + (Math.floor(elapsed / 86400) + 1)
     + ' ' + String(h).padStart(2, '0')
     + ':' + String(m).padStart(2, '0');
 }
@@ -287,11 +290,13 @@ const LabPanel: React.FC<Props> = ({ isOpen, onClose }) => {
   const [activeTab,    setActiveTab]    = useState<string>('gases');
   const [viewOffset,   setViewOffset]   = useState(0);
   const [confirmClear, setConfirmClear] = useState(false);
+  const [viewMode,     setViewMode]     = useState<'classic' | 'clinical_day'>('classic');
 
   const labOrders      = usePatientStore(s => s.labOrders);
   const instantResults = usePatientStore(s => s.instantResults);
   const clearLabOrders = usePatientStore(s => s.clearLabOrders);
   const elapsed        = useTimeStore(s => s.simulatedElapsed);
+  const startTick      = useScenarioStore(s => s.scenarioStartTick);
 
   const completedOrders = useMemo(
     () => labOrders.filter(o => o.result !== null).reverse(),
@@ -401,6 +406,17 @@ const LabPanel: React.FC<Props> = ({ isOpen, onClose }) => {
             )}
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            {/* View toggle */}
+            {(['classic', 'clinical_day'] as const).map(v => (
+              <button type="button" key={v} onClick={() => setViewMode(v)} style={{
+                background: viewMode === v ? 'rgba(56,189,248,0.15)' : 'none',
+                border: `1px solid ${viewMode === v ? 'rgba(56,189,248,0.5)' : 'rgba(255,255,255,0.1)'}`,
+                borderRadius: 4, color: viewMode === v ? '#38bdf8' : '#6b7280', fontFamily: MONO,
+                fontSize: '0.5rem', padding: '3px 9px', cursor: 'pointer', fontWeight: 700,
+              }}>
+                {v === 'classic' ? 'ANALÍTICO' : 'POR DÍA'}
+              </button>
+            ))}
             {pendingOrders.length > 0 && (
               <span style={{ color: '#fbbf24', fontFamily: MONO, fontSize: '0.55rem' }}>
                 {pendingOrders.length} pendiente{pendingOrders.length > 1 ? 's' : ''}
@@ -420,7 +436,12 @@ const LabPanel: React.FC<Props> = ({ isOpen, onClose }) => {
         </div>
 
         {/* ── Body ─────────────────────────────────────────────────────────── */}
-        <div style={{ display: 'flex', flex: 1, overflow: 'hidden', minHeight: 0 }}>
+        {viewMode === 'clinical_day' ? (
+          <div style={{ flex: 1, overflow: 'hidden', minHeight: 0 }}>
+            <LabPanelClinicalDay />
+          </div>
+        ) : null}
+        <div style={{ display: viewMode === 'classic' ? 'flex' : 'none', flex: 1, overflow: 'hidden', minHeight: 0 }}>
 
           {/* Columna izquierda — menú de órdenes */}
           <div style={{
@@ -429,7 +450,29 @@ const LabPanel: React.FC<Props> = ({ isOpen, onClose }) => {
             display: 'flex', flexDirection: 'column', overflow: 'hidden',
             background: '#060c1a',
           }}>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 3, padding: '10px 8px 6px' }}>
+            {/* ── RUTINA DE INGRESO ──────────────────────────────────── */}
+            <button
+              type="button"
+              onClick={() => LabEngine.getInstance().orderRoutineAdmission()}
+              style={{
+                margin: '8px 8px 4px',
+                padding: '8px 6px',
+                borderRadius: 7,
+                background: 'linear-gradient(135deg, #4f46e5 0%, #0891b2 100%)',
+                border: '1px solid rgba(99,102,241,0.5)',
+                color: '#fff',
+                fontFamily: MONO, fontSize: '0.52rem', fontWeight: 900,
+                letterSpacing: '0.05em',
+                cursor: 'pointer',
+                boxShadow: '0 4px 15px rgba(79,70,229,0.25)',
+                textAlign: 'center',
+                lineHeight: 1.3,
+              }}
+            >
+              📋 RUTINA DE INGRESO<br />
+              <span style={{ fontSize: '0.40rem', fontWeight: 400, opacity: 0.8 }}>10 estudios simultáneos</span>
+            </button>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 3, padding: '0 8px 6px' }}>
               {CATEGORIES.map(cat => {
                 const active = activeTab === cat.key;
                 return (
@@ -561,7 +604,7 @@ const LabPanel: React.FC<Props> = ({ isOpen, onClose }) => {
                               fontSize: '0.58rem', color: C_TS,
                               letterSpacing: '0.04em', fontWeight: 700,
                             }}>
-                              {fmtTime(o.orderedAt)}
+                              {fmtTime(o.orderedAt, startTick)}
                               {instantResults && (
                                 <span style={{ color: '#fbbf24', marginLeft: 4 }}>⚡</span>
                               )}

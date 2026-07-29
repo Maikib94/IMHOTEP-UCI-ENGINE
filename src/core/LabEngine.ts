@@ -340,6 +340,27 @@ export class LabEngine {
     pat.addLabOrder(order);
   }
 
+  /**
+   * Rutina de ingreso UCI (10 estudios).
+   * Cubre gasometría, hemograma, crasis, BMP, ionograma, albúmina, PCR, PCT, lactato, glucemia.
+   * Basado en SATI Algoritmo de Ingreso UCI 2023.
+   */
+  public orderRoutineAdmission(): void {
+    const ROUTINE: string[] = [
+      'abg',       // Gases arteriales
+      'lactate',   // Lactato sérico
+      'glucose_r', // Glucemia rápida (POC)
+      'cbc',       // Hemograma + fórmula leucocitaria
+      'coag',      // Coagulación (TP/KPTT/Fibrinógeno)
+      'bmp',       // Perfil metabólico básico
+      'ionogram',  // Ionograma (Na/K/Cl/Mg/Ca)
+      'albumin',   // Albúmina
+      'crp',       // PCR cuantitativa
+      'pct',       // Procalcitonina
+    ];
+    ROUTINE.forEach(t => this.placeOrder(t));
+  }
+
   public update(): void {
     const pat  = usePatientStore.getState();
     const time = useTimeStore.getState();

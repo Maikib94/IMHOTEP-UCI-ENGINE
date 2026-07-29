@@ -209,6 +209,27 @@ const SITE_PATHOGEN_ODDS: Partial<Record<CultureSiteType, SiteOddsTable>> = {
     aspergillus_fumigatus:   0.04,
     NEGATIVE:                0.04,
   },
+  // ── Urocultivos — Wen Y et al. PLoS ONE 2025; Islam MA et al. PLoS ONE 2022 ──
+  // Comunidad: E. coli 51.6%, K. pneumoniae 11.9%, S. saprophyticus 8.3%
+  // Hospital/ESBL: Shkalim Zemer V et al. Pathogens 2024 — ESBL 6→25%
+  urine_catheter: {
+    ecoli_wild:              0.35,   // E. coli sensible comunidad
+    ecoli_esbl:              0.15,   // E. coli ESBL (catéter = riesgo nosocomial)
+    kpneumo_esbl:            0.15,   // K. pneumoniae ESBL
+    paeru_mdr:               0.10,   // P. aeruginosa (catéter prolongado)
+    efaecium_vre:            0.10,   // Enterococcus (sonda prolongada)
+    candida_albicans:        0.08,   // Candida (catéter + ATB previo)
+    NEGATIVE:                0.07,
+  },
+  urine_midstream: {
+    ecoli_wild:              0.52,   // E. coli comunidad predominante
+    kpneumo_community:       0.13,
+    efaecalis:               0.08,
+    spneumo:                 0.04,   // S. agalactiae proxy
+    paeru_mdr:               0.04,
+    candida_albicans:        0.03,
+    NEGATIVE:                0.16,
+  },
 };
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -308,13 +329,25 @@ export class MicrobiologyEngine {
     // 6. Nefrotoxicidad real → creatinina
     this.applyNephrotoxicity(updatedATBs, dt);
 
-    // 7. Escribir estado
+    // 7. Revelar germen cuando primer cultivo positivo resuelve
+    // (FASE 6.A): revealedGerm permanece null hasta que el laboratorio entrega resultado.
+    const firstPositive = updatedCultures.find(c => c.status === 'positive' && c.result?.isPositive);
+    const newRevealedGerm = firstPositive?.result?.pathogenId ?? null;
+    if (newRevealedGerm && newRevealedGerm !== micro.revealedGerm) {
+      useMicrobiologyStore.getState().revealGerm(newRevealedGerm);
+    }
+
+    // 6.C: appropriateCoverage — true si ATBs cubren el germen real
+    const appropriateCoverage = efficacy === 'empiric_match' || efficacy === 'targeted';
+
+    // 8. Escribir estado
     micro._engineUpdate({
       activeAntibiotics:         updatedATBs,
       cultures:                  updatedCultures,
       treatmentEfficacy:         efficacy,
       sepsisProgressionModifier: finalModifier,
       rose:                      updatedROSE,
+      appropriateCoverage,
     });
   }
 
@@ -337,14 +370,77 @@ export class MicrobiologyEngine {
 
     if (currentHiddenId && PATHOGEN_CATALOG[currentHiddenId]) return; // ya asignado
 
-    // Usar tabla de hemocultivo como proxy de bacteriemia sepsis primaria
-    const bloodTable = SITE_PATHOGEN_ODDS['blood_peripheral_1'];
-    if (!bloodTable) return;
-
-    const pick = weightedPick(bloodTable);
-    if (pick !== 'NEGATIVE' && PATHOGEN_CATALOG[pick]) {
+    const pick = this.selectGermByProfile();
+    if (pick && pick !== 'NEGATIVE' && PATHOGEN_CATALOG[pick]) {
       useMicrobiologyStore.getState().assignPathogen(pick);
     }
+  }
+
+  /**
+   * Selecciona germen ocultando la verdad epidemiológica según:
+   *   1. Exposición hospitalaria (comorbilidades del paciente)
+   *   2. Foco anatómico (subtype de sepsis)
+   *   3. Dificultad del escenario (resistencia)
+   *
+   * FASE 6.B — Refs: Tamma PD et al. CID 2024 (IDSA AMR guidance);
+   *            ENVIN-HELICS 2023; Sanford Guide 2025.
+   */
+  private selectGermByProfile(): string | null {
+    const pat      = usePatientStore.getState();
+    const pathology = usePathologyStore.getState();
+    const comorbIds = pat.comorbidityIds ?? [];
+
+    // 1. Detección de exposición hospitalaria
+    const hospitalExposure =
+      comorbIds.includes('dialisis_hd')                ||
+      comorbIds.includes('dialisis_pd')                ||
+      comorbIds.includes('inmunosupresion_trasplante') ||
+      comorbIds.includes('inmunosupresion_qt')         ||
+      comorbIds.includes('inmunosupresion_hiv');
+
+    // 2. Foco infeccioso desde patología activa
+    const sepsisSubtype = (pathology.sepsis?.isActive ? pathology.sepsis : null);
+
+    // Mapear foco a tabla de sitio de cultivo:
+    // Usamos las tablas de SITE_PATHOGEN_ODDS para gérmenes representativos de cada foco.
+    type FocusKey = 'pulmonary' | 'urinary' | 'abdominal' | 'default';
+    const focusKey: FocusKey =
+      sepsisSubtype ? (
+        /pulmon|neumon/i.test(JSON.stringify(sepsisSubtype)) ? 'pulmonary' :
+        /urin|itu|pielonefr/i.test(JSON.stringify(sepsisSubtype)) ? 'urinary' :
+        /abdom|periton|intraabdom/i.test(JSON.stringify(sepsisSubtype)) ? 'abdominal' :
+        'default'
+      ) : 'default';
+
+    // 3. Tablas de gérmenes por foco (comunitario vs hospitalario)
+    const COMMUNITY_POOLS: Record<FocusKey, string[]> = {
+      pulmonary: ['spneumoniae', 'haemophilus_influenzae', 'spneumoniae', 'kpneumoniae_wild'],
+      urinary:   ['ecoli_esbl', 'ecoli_wild', 'ecoli_wild', 'kpneumoniae_wild'],
+      abdominal: ['ecoli_wild', 'ecoli_esbl', 'saureus_mssa', 'kpneumoniae_wild'],
+      default:   ['ecoli_wild', 'spneumoniae', 'saureus_mssa', 'kpneumoniae_wild'],
+    };
+    const HOSPITAL_POOLS: Record<FocusKey, string[]> = {
+      pulmonary: ['pseudomonas_aeruginosa', 'kpneumoniae_kpc', 'saureus_mrsa', 'acinetobacter_baumanii_xdr'],
+      urinary:   ['ecoli_esbl', 'kpneumoniae_kpc', 'pseudomonas_aeruginosa', 'efaecium_vre'],
+      abdominal: ['ecoli_esbl', 'kpneumoniae_kpc', 'efaecium_vre', 'candida_albicans'],
+      default:   ['saureus_mrsa', 'pseudomonas_aeruginosa', 'kpneumoniae_kpc', 'ecoli_esbl'],
+    };
+
+    const pool = hospitalExposure ? HOSPITAL_POOLS[focusKey] : COMMUNITY_POOLS[focusKey];
+
+    // 4. Filtrar a gérmenes que existen en el catálogo
+    const validPool = pool.filter(id => id in PATHOGEN_CATALOG);
+
+    if (validPool.length === 0) {
+      // Fallback a tabla de hemocultivo
+      const bloodTable = SITE_PATHOGEN_ODDS['blood_peripheral_1'];
+      if (!bloodTable) return null;
+      const pick = weightedPick(bloodTable);
+      return pick !== 'NEGATIVE' ? pick : null;
+    }
+
+    // 5. Selección aleatoria uniforme dentro del pool
+    return validPool[Math.floor(Math.random() * validPool.length)];
   }
 
   // ════════════════════════════════════════════════════════════════════════════

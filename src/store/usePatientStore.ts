@@ -3,6 +3,60 @@ import { create } from 'zustand';
 export type PupilState = 'reactive' | 'sluggish' | 'unreactive' | 'miotic';
 export type LabCategory = 'gases' | 'hema' | 'quimica' | 'especial';
 
+// ─── Procedures — estado anatómico invasivo ───────────────────────────────────
+// Robba C et al., Lancet Neurol 2021 (SYNAPSE-ICU) — PIC selectivo.
+// Lehman LH et al., Crit Care Med 2013 — NIBP vs IBP.
+
+export type ArterialSite  = 'radial_left' | 'radial_right' | 'femoral_left' | 'femoral_right' | 'brachial';
+export type CentralSite   = 'subclavian_right' | 'subclavian_left' | 'jugular_right' | 'jugular_left' | 'femoral';
+export type ICPDevice     = 'none' | 'parenchymal' | 'ventricular_evd';
+export type NIBPInterval  = 5 | 10 | 15 | 30;
+
+export interface NIBPSample {
+  systolicBP:           number;
+  diastolicBP:          number;
+  meanArterialPressure: number;
+  capturedAtTick:       number;
+}
+
+export interface ProceduresState {
+  arterialLine:    boolean;
+  arterialSite:    ArterialSite;
+  centralLine:     boolean;
+  centralSite:     CentralSite;
+  piccCatheter:    boolean;
+  picMonitor:      boolean;
+  icpDevice:       ICPDevice;
+  urinaryCatheter: boolean;
+  ecmo:            boolean;
+  crrt:            boolean;
+  nibp: {
+    enabled:         boolean;
+    intervalMinutes: NIBPInterval;
+    isInflating:     boolean;
+    lastSample:      NIBPSample | null;
+  };
+}
+
+const INITIAL_PROCEDURES: ProceduresState = {
+  arterialLine:    false,
+  arterialSite:    'radial_left',
+  centralLine:     false,
+  centralSite:     'jugular_right',
+  piccCatheter:    false,
+  picMonitor:      false,
+  icpDevice:       'none',
+  urinaryCatheter: true,   // estándar UCI — Foley default ON
+  ecmo:            false,
+  crrt:            false,
+  nibp: {
+    enabled:         true,
+    intervalMinutes: 5,
+    isInflating:     false,
+    lastSample:      null,
+  },
+};
+
 export type FluidType =
   | 'ringer_lactato' | 'sf_09' | 'dex5' | 'dex10' | 'dex50'
   | 'prbc' | 'ffp' | 'platelets' | 'cryo';
@@ -115,6 +169,18 @@ export interface Vitals {
   pfRatio: number;       // paO2 / fio2Effective (mmHg)
   ardsActive: boolean;   // pfRatio ≤ 300 con PEEP ≥ 5 (con histéresis: desactiva > 320)
   ardsSeverityLevel: 'NONE' | 'MILD' | 'MODERATE' | 'SEVERE'; // clasificación Berlin
+  // Electrolitos (Fase 4) — actualizados por RenalEngine
+  kPlasma: number;       // mEq/L — potasio sérico (normal 3.5-5.0; alarma < 3.0)
+  // Glucemia (Fase 4 layout; motor Fase 5)
+  glucoseMgdL: number;   // mg/dL — glucemia (normal 70-140 UCI; GlucoseEngine Fase 5)
+  // Magnesio sérico (Área 5 — sulfato Mg obstétrico/eclampsia)
+  magnesiumMgdL: number; // mg/dL — normal 1.7-2.4; tóxico >7; letal >12
+  // GEDI continua (actualizada cada tick por CardiovascularEngine)
+  // Ref: Sakka SG ICM 2000 — GEDI normal 680-800 mL/m²
+  gedi: number;          // mL/m² — global end-diastolic index
+  // EVLWI continua (actualizada por CardiovascularEngine; furosemida lo reduce)
+  // Ref: Kushimoto Crit Care 2012 — normal 3-7 mL/kg PBW; ≥10 ARDS
+  evlwi: number;         // mL/kg PBW — extravascular lung water index
 }
 
 export type VentilatorMode = 'VC-AC' | 'PC-AC' | 'PSV' | 'SIMV' | 'CPAP';
@@ -270,6 +336,9 @@ export interface Ventilator {
   pMean: number;                       // cmH₂O (Mean Airway Pressure)
   autoPEEP: number;                    // cmH₂O
   minuteVentilation: number;           // L/min
+  // ── Resultados de maniobras de pausa (escritos por RespiratoryEngine) ─────
+  measuredCstat: number;               // mL/cmH₂O (Cstat = Vt / (Pplat - PEEP))
+  measuredAutoPeepInspPause: number;   // cmH₂O (auto-PEEP detectado en pausa espiratoria)
 }
 
 export interface LabResult {
@@ -329,6 +398,11 @@ const INITIAL_VITALS: Vitals = {
   pfRatio: 462,          // paO2 97 / fio2 0.21 ≈ 462 (paciente sano, no cumple criterio ARDS)
   ardsActive: false,
   ardsSeverityLevel: 'NONE',
+  kPlasma: 4.0,          // mEq/L (normal)
+  glucoseMgdL: 99,       // mg/dL (normal UCI; Fase 5 lo driveará dinámicamente)
+  magnesiumMgdL: 2.0,   // mg/dL (normal 1.7-2.4)
+  gedi: 740,             // mL/m² (normal; CardiovascularEngine actualiza cada tick)
+  evlwi: 5.0,           // mL/kg PBW (normal; CardiovascularEngine actualiza cada tick)
 };
 
 const BV_NORMAL = 5000;
@@ -366,6 +440,8 @@ const VENT_RANGES: Partial<Record<keyof Ventilator, [number, number]>> = {
   pMean:            [0,    50],
   autoPEEP:         [0,    20],
   minuteVentilation:[0,    40],
+  measuredCstat:    [0,    200],
+  measuredAutoPeepInspPause:[0, 25],
 };
 
 function sanitizeVentilator(partial: Partial<Ventilator>): Partial<Ventilator> {
@@ -405,9 +481,86 @@ const ACCORDION_DEFAULTS: Record<string, boolean> = {
   'arm-quick':             true,
 };
 
+// ─── PatientProfile — sensibilidad individual del huésped (Fase ARDS 1.D) ─────
+//
+//  Referencia:  Goligher EC AJRCCM 2021 (elastancia individual);
+//               Villar J CCM 2017 (fenotipo SDRA hiper/hipoinflam.)
+//  PBW (Devine): M = 50 + 0.9×(h−152.4), F = 45.5 + 0.9×(h−152.4) — en kg
+//
+export interface PatientProfile {
+  id: string;
+  name: string;
+  age: number;
+  sex: 'M' | 'F';
+  heightCm: number;
+  weightKg: number;
+  bmi: number;
+  pbwKg: number;
+  comorbidities: string[];
+  /** Sensibilidad a injuria pulmonar. >1.0 = lábil (frágil). <1.0 = robusto. */
+  hostSensitivity: number;
+  /** Respuesta a soporte no invasivo. >1.0 = se estabiliza con HFNO. */
+  noninvasiveResponsiveness: number;
+  baseVitals: Partial<Vitals>;
+}
+
+// ─── Tipos de Factoría de Pacientes (Fase 1 PatientFactory) ──────────────────
+//  Bruno Ann Intensive Care 2023 (CFS); Rockwood Lancet 1999 (CFS 1-9)
+
+export type ComorbidityId =
+  | 'hta' | 'stents_cor' | 'hf_pef' | 'hf_ref' | 'af_cronica'
+  | 'val_aortica' | 'val_mitral'
+  | 'epoc_gold1' | 'epoc_gold2' | 'epoc_gold3' | 'asma_persistente'
+  | 'tabaquismo_activo' | 'tabaquismo_ex' | 'sahos'
+  | 'dm1' | 'dm2_no_insulin' | 'dm2_insulin' | 'hipotiroidismo'
+  | 'obesidad_g1' | 'obesidad_g2' | 'obesidad_g3'
+  | 'erc_g1' | 'erc_g2' | 'erc_g3a' | 'erc_g3b' | 'erc_g4' | 'erc_g5'
+  | 'dialisis_hd' | 'dialisis_pd'
+  | 'cirrosis_a' | 'cirrosis_b' | 'cirrosis_c'
+  | 'acv_secuela' | 'drogas_estimulantes' | 'drogas_depresores'
+  | 'inmunosupresion_qt' | 'inmunosupresion_hiv' | 'inmunosupresion_trasplante'
+  | 'qx_mayor_reciente' | 'qx_cardiaca_previa';
+
+export type CFSScore = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
+
+export interface HomeMed {
+  drug: string;
+  dose: number;
+  unit: string;
+  freq: 'q24h' | 'q12h' | 'q8h' | 'q6h' | 'prn';
+  indication?: string;
+}
+
+export type PreAdmissionContext =
+  | 'er'           // Sala de emergencias / urgencias
+  | 'or'           // Quirófano (post-operatorio inmediato)
+  | 'ward'         // Sala general / piso
+  | 'home'         // Domicilio
+  | 'icu_other'    // Otra UCI / traslado interhospitalario
+  | 'nursing_home'; // Hogar de ancianos
+
+/** Perfil extendido generado por PatientFactory (superconjunto de PatientProfile) */
+export interface GeneratedPatient extends PatientProfile {
+  frailtyContinuous: number;   // 0..1 — índice continuo (Fronczek Crit Care 2021)
+  cfsScore: CFSScore;          // 1–9 Rockwood Clinical Frailty Scale
+  comorbidityIds: ComorbidityId[];
+  homeMeds: HomeMed[];
+  bsaMosteller: number;        // m² — BSA Mosteller √(kg×cm/3600)
+  clinicalSummary: string;     // 2-3 líneas narrativas autogeneradas
+  preAdmissionContext?: PreAdmissionContext;
+  hospitalExposureDays?: number;  // 0 = comunidad
+  preAdmissionNarrative?: string; // 2-4 frases autogeneradas
+}
+
 interface PatientState {
   vitals: Vitals;
   bloodVolume: number;
+  profile: GeneratedPatient | null;
+  // Campos de factoría (duplicados del profile para acceso directo)
+  frailtyContinuous: number;
+  cfsScore: number;
+  comorbidityIds: ComorbidityId[];
+  homeMeds: HomeMed[];
 
   // UI
   accordionExpanded: Record<string, boolean>;
@@ -417,6 +570,10 @@ interface PatientState {
   crystalloidAccumulated: number;
   prbcUnitsGiven: number;
   ffpUnitsGiven: number;
+  // Hidratación de mantenimiento (Fase 5) — Hahn RG BJA 2018-2021 (volume kinetics)
+  maintenanceFluidRate_mLh: number;          // mL/h; 0 = desactivada
+  maintenanceFluidType: 'ringer_lactato' | 'sf_09' | 'dex5';
+  maintenanceCumulative_mL: number;          // total administrado en la sesión
   instantResults: boolean;
   isVentilatorConnected: boolean;
   ventilator: Ventilator;
@@ -449,7 +606,7 @@ interface PatientState {
   // Acciones Fase 2+
   toggleVentilatorPause: () => void;
   setVentilatorParam: (k: keyof Ventilator, v: number) => void;
-  applyVentOutputs: (outputs: Pick<Ventilator, 'pPeak' | 'pPlateau' | 'pMean' | 'autoPEEP' | 'minuteVentilation' | 'fio2Effective'>) => void;
+  applyVentOutputs: (outputs: Pick<Ventilator, 'pPeak' | 'pPlateau' | 'pMean' | 'autoPEEP' | 'minuteVentilation' | 'fio2Effective'> & Partial<Pick<Ventilator, 'measuredCstat' | 'measuredAutoPeepInspPause'>>) => void;
 
   // Acciones Fase 3 — maniobras de pausa del operador
   triggerPauseManeuver: (type: VentilatorPauseState) => void;
@@ -470,23 +627,49 @@ interface PatientState {
   setVentilatorConnected: (v: boolean) => void;
   resetFluidTracking: () => void;
   administerFluid: (type: FluidType, volume: number) => void;
+  /** Mantenimiento: aplica 30% de retención IV + acumula contador (CronosEngine tick) */
+  addMaintenanceTick: (delta_mL: number) => void;
+  setMaintenanceFluidRate: (rate: number) => void;
+  setMaintenanceFluidType: (type: 'ringer_lactato' | 'sf_09' | 'dex5') => void;
   setVentilator: (partial: Partial<Ventilator>) => void;
   addLabOrder: (order: LabOrder) => void;
   fulfillLabOrder: (id: string, result: LabResult) => void;
   clearLabOrders: () => void;
+  setProfile: (p: GeneratedPatient | null) => void;
+  /** Throttled by CronosEngine to 10 Hz — triggers UI subscriptions. */
+  publishVitals: () => void;
+  vitalsRevision: number;
+
+  // ── Procedures — dispositivos invasivos colocados ──────────────────────────
+  procedures: ProceduresState;
+  setProcedure: <K extends keyof ProceduresState>(key: K, value: ProceduresState[K]) => void;
+  setNIBPInterval: (m: NIBPInterval) => void;
+  setNIBPInflating: (v: boolean) => void;
+  captureNIBPSample: (sample: NIBPSample) => void;
+  resetProcedures: () => void;
 }
 
 export const usePatientStore = create<PatientState>((set) => ({
+  vitalsRevision: 0,
   vitals: { ...INITIAL_VITALS },
   accordionExpanded: { ...ACCORDION_DEFAULTS },
+  procedures: { ...INITIAL_PROCEDURES, nibp: { ...INITIAL_PROCEDURES.nibp } },
   setAccordionExpanded: (id, expanded) =>
     set(s => ({ accordionExpanded: { ...s.accordionExpanded, [id]: expanded } })),
   bloodVolume: BV_NORMAL,
   hemorrhageRate: 0,
   redBloodCellMass: RBC_MASS_NORMAL,
   crystalloidAccumulated: 0,
+  profile: null,
+  frailtyContinuous: 0,
+  cfsScore: 1,
+  comorbidityIds: [],
+  homeMeds: [],
   prbcUnitsGiven: 0,
   ffpUnitsGiven: 0,
+  maintenanceFluidRate_mLh: 0,
+  maintenanceFluidType: 'ringer_lactato',
+  maintenanceCumulative_mL: 0,
   instantResults: false,
   isVentilatorConnected: false,
   ventilator: {
@@ -498,6 +681,7 @@ export const usePatientStore = create<PatientState>((set) => ({
     pauseManeuver: 'NONE',
     fio2Effective: 0.40,
     pPeak: 0, pPlateau: 0, pMean: 0, autoPEEP: 0, minuteVentilation: 0,
+    measuredCstat: 0, measuredAutoPeepInspPause: 0,
   },
   respiratoryDevice: { ...INITIAL_RESP_DEVICE },
   labOrders: [],
@@ -517,7 +701,17 @@ export const usePatientStore = create<PatientState>((set) => ({
     crystalloidAccumulated: 0,
     prbcUnitsGiven: 0,
     ffpUnitsGiven: 0,
+    maintenanceCumulative_mL: 0,
   }),
+
+  // 30% IV retention (Hahn RG BJA 2018-2021, volume kinetics cristaloides)
+  addMaintenanceTick: (delta_mL) => set((s) => ({
+    bloodVolume: Math.min(9000, s.bloodVolume + delta_mL * 0.30),
+    crystalloidAccumulated: s.crystalloidAccumulated + delta_mL,
+    maintenanceCumulative_mL: s.maintenanceCumulative_mL + delta_mL,
+  })),
+  setMaintenanceFluidRate: (rate) => set({ maintenanceFluidRate_mLh: Math.max(0, Math.min(500, rate)) }),
+  setMaintenanceFluidType: (type) => set({ maintenanceFluidType: type }),
 
   administerFluid: (type, volume) => set((s) => {
     const props = FLUID_CATALOG[type];
@@ -544,6 +738,40 @@ export const usePatientStore = create<PatientState>((set) => ({
   addLabOrder: (order) => set((s) => ({ labOrders: [...s.labOrders, order] })),
   fulfillLabOrder: (id, result) => set((s) => ({ labOrders: s.labOrders.map((o) => o.id === id ? { ...o, result } : o) })),
   clearLabOrders: () => set({ labOrders: [] }),
+  setProfile: (p) => set({
+    profile: p,
+    frailtyContinuous: p?.frailtyContinuous ?? 0,
+    cfsScore: p?.cfsScore ?? 1,
+    comorbidityIds: p?.comorbidityIds ?? [],
+    homeMeds: p?.homeMeds ?? [],
+  }),
+
+  publishVitals: () => set((s) => ({ vitalsRevision: s.vitalsRevision + 1 })),
+
+  // ── Procedures actions ────────────────────────────────────────────────────
+  setProcedure: (key, value) => set((s) => {
+    const updated = { ...s.procedures, [key]: value };
+    // Regla: picMonitor false → icpDevice='none'. true → default 'parenchymal'.
+    if (key === 'picMonitor') {
+      if (!value) updated.icpDevice = 'none';
+      else if (updated.icpDevice === 'none') updated.icpDevice = 'parenchymal';
+    }
+    return { procedures: updated };
+  }),
+
+  setNIBPInterval: (m) => set((s) => ({
+    procedures: { ...s.procedures, nibp: { ...s.procedures.nibp, intervalMinutes: m } },
+  })),
+
+  setNIBPInflating: (v) => set((s) => ({
+    procedures: { ...s.procedures, nibp: { ...s.procedures.nibp, isInflating: v } },
+  })),
+
+  captureNIBPSample: (sample) => set((s) => ({
+    procedures: { ...s.procedures, nibp: { ...s.procedures.nibp, lastSample: sample, isInflating: false } },
+  })),
+
+  resetProcedures: () => set({ procedures: { ...INITIAL_PROCEDURES, nibp: { ...INITIAL_PROCEDURES.nibp } } }),
 
   administerBolus: (ml = 500) =>
     set((s) => ({

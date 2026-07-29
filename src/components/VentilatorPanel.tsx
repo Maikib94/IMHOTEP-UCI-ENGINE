@@ -6,6 +6,14 @@ import React, { useEffect, useRef, useCallback, useState } from 'react';
 import { usePatientStore, VentilatorMode } from '../store/usePatientStore';
 import { usePathologyStore } from '../store/usePathologyStore';
 import VentilatorCurves from './VentilatorCurves';
+import {
+  useManeuverHistoryStore,
+  fmtSimTime,
+  INSP_COLORS,
+  EXP_COLORS,
+  type InspPauseRecord,
+  type ExpPauseRecord,
+} from '../store/useManeuverHistoryStore';
 
 // ─── Paleta industrial ────────────────────────────────────────────────────────
 const C = {
@@ -369,9 +377,27 @@ export interface VentilatorPanelProps {
 // ─── Componente principal (Modal) ─────────────────────────────────────────────
 
 export default function VentilatorPanel({ isOpen, onClose }: VentilatorPanelProps) {
+  // FASE 3.A: Auto-conectar ARM al abrir el modal.
+  // El panel solo se monta cuando isOpen===true (guarded por `if (!isOpen) return null`).
+  // Si el paciente no estaba intubado, conectar ahora para llenar el buffer de ondas.
+  useEffect(() => {
+    const pat = usePatientStore.getState();
+    if (!pat.isVentilatorConnected) {
+      pat.setVentilatorConnected(true);
+      // Si el soporte no era ARM, elevarlo (INVASIVE_ARM = modo invasivo)
+      if (pat.ventilator.o2Support !== 'INVASIVE_ARM') {
+        pat.setO2Support('INVASIVE_ARM');
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // corre una vez al montar (=cuando isOpen pasa a true)
+
   const [inspPause,       setInspPause]       = useState(false);
   const [expPause,        setExpPause]         = useState(false);
   const [bottomTab,       setBottomTab]        = useState<'maniobras' | 'reclutamiento'>('maniobras');
+  const [histTab,         setHistTab]          = useState<'insp' | 'exp'>('insp');
+  const [histExpanded,    setHistExpanded]     = useState(false);
+  const [confirmClear,    setConfirmClear]     = useState(false);
   const [recruitActive,   setRecruitActive]    = useState(false);
   const [recruitProgress, setRecruitProgress]  = useState(0);
   const [recruitEffect,   setRecruitEffect]    = useState<'none' | 'applied' | 'fibrotic'>('none');
@@ -385,6 +411,11 @@ export default function VentilatorPanel({ isOpen, onClose }: VentilatorPanelProp
   const ards                  = usePathologyStore(s => s.ards);
   const modifiers             = usePathologyStore(s => s.modifiers);
   const updateModifiers       = usePathologyStore(s => s.updateModifiers);
+  const pauseManeuver         = usePatientStore(s => s.ventilator.pauseManeuver);
+  const triggerPauseManeuver  = usePatientStore(s => s.triggerPauseManeuver);
+  const inspHistory           = useManeuverHistoryStore(s => s.inspPauses);
+  const expHistory            = useManeuverHistoryStore(s => s.expPauses);
+  const clearHistory          = useManeuverHistoryStore(s => s.clearHistory);
 
   // Controles que se deshabilitan según o2Support
   const isInvasive    = vent.o2Support === 'INVASIVE_ARM';
@@ -392,12 +423,8 @@ export default function VentilatorPanel({ isOpen, onClose }: VentilatorPanelProp
   const showVentCtrls = isInvasive || isNIV;
   const showVtPinsp   = isInvasive;    // Vt/Pinsp sólo ARM invasivo
 
-  // Pausar simulación al abrir (vía isPaused), reanudar al cerrar
-  useEffect(() => {
-    const store = usePatientStore.getState();
-    if (isOpen && !store.ventilator.isPaused)  store.toggleVentilatorPause();
-    if (!isOpen && store.ventilator.isPaused)  store.toggleVentilatorPause();
-  }, [isOpen]);
+  // Spec 4.C: NO pausar useTimeStore automáticamente — la maniobra ocurre
+  // en tiempo simulado real. El panel se puede abrir sin detener la física.
 
   // Timer de maniobra de reclutamiento (40 s)
   useEffect(() => {
@@ -707,7 +734,7 @@ export default function VentilatorPanel({ isOpen, onClose }: VentilatorPanelProp
             borderRight: `1px solid ${C.sep}`,
             overflow: 'hidden',
           }}>
-            <VentilatorCurves height={88} />
+            <VentilatorCurves heights={[88, 88, 88]} />
           </div>
 
           {/* ─ DERECHA: Monitoreo ─ */}
@@ -840,94 +867,236 @@ export default function VentilatorPanel({ isOpen, onClose }: VentilatorPanelProp
 
             {/* ─── MANIOBRAS ─── */}
             {bottomTab === 'maniobras' && (
-              <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start' }}>
-                {/* Pausa Inspiratoria */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'center', minWidth: 120 }}>
-                  <button
-                    type="button"
-                    onMouseDown={() => setInspPause(true)}
-                    onMouseUp={() => setInspPause(false)}
-                    onTouchStart={() => setInspPause(true)}
-                    onTouchEnd={() => setInspPause(false)}
-                    style={{
-                      padding: '8px 16px',
-                      background: inspPause ? '#1a1500' : '#14141e',
-                      border: `2px solid ${inspPause ? '#f5c518' : C.border}`,
-                      borderRadius: 7, cursor: 'pointer',
-                      fontSize: '0.48rem', fontWeight: 900, letterSpacing: '0.1em',
-                      color: inspPause ? '#f5c518' : C.midText,
-                      fontFamily: 'monospace',
-                      boxShadow: inspPause ? '0 0 15px rgba(245,197,24,0.3)' : 'none',
-                      transition: 'all 0.1s',
-                      minWidth: 110,
-                    }}
-                  >
-                    {inspPause ? '⏸ EN PAUSA' : '⏸ PAUSA INSP'}
-                  </button>
-                  <div style={{ fontSize: '0.34rem', color: C.dimText, textAlign: 'center', lineHeight: 1.4 }}>
-                    Mantener presionado<br />
-                    Flujo→0 · Revela <span style={{ color: '#f5c518' }}>Pplat</span>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+
+                {/* Botones + MEDIENDO overlay */}
+                <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start' }}>
+
+                  {/* Pausa Inspiratoria */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'center', minWidth: 130 }}>
+                    <button
+                      type="button"
+                      onClick={() => triggerPauseManeuver(pauseManeuver === 'INSPIRATORY' ? 'NONE' : 'INSPIRATORY')}
+                      disabled={pauseManeuver === 'EXPIRATORY'}
+                      style={{
+                        padding: '8px 16px', cursor: 'pointer', minWidth: 120,
+                        background: pauseManeuver === 'INSPIRATORY' ? '#1a1500' : '#14141e',
+                        border: `2px solid ${pauseManeuver === 'INSPIRATORY' ? '#f5c518' : C.border}`,
+                        borderRadius: 7, fontSize: '0.48rem', fontWeight: 900,
+                        letterSpacing: '0.1em', fontFamily: 'monospace',
+                        color: pauseManeuver === 'INSPIRATORY' ? '#f5c518' : C.midText,
+                        boxShadow: pauseManeuver === 'INSPIRATORY' ? '0 0 15px rgba(245,197,24,0.3)' : 'none',
+                        opacity: pauseManeuver === 'EXPIRATORY' ? 0.4 : 1,
+                      }}
+                    >
+                      {pauseManeuver === 'INSPIRATORY' ? '⏱ MEDIENDO…' : '⏸ PAUSA INSP (2s)'}
+                    </button>
+                    <div style={{ fontSize: '0.34rem', color: C.dimText, textAlign: 'center', lineHeight: 1.4 }}>
+                      Flujo→0 · Mide <span style={{ color: '#f5c518' }}>Pplat, ΔP, Cstat</span>
+                    </div>
+                    {pauseManeuver === 'INSPIRATORY' && (
+                      <div style={{ background: '#1a1500', border: '1px solid #f5c51866', borderRadius: 4, padding: '2px 8px', fontSize: '0.38rem', color: '#f5c518' }}>
+                        Pplat en curso ≈ {Math.round(v.pplat)} cmH₂O
+                      </div>
+                    )}
+                    {pauseManeuver === 'NONE' && inspHistory.length > 0 && (
+                      <div style={{ fontSize: '0.34rem', color: INSP_COLORS[inspHistory[0].interpretation], fontFamily: 'monospace' }}>
+                        Último: ΔP {inspHistory[0].drivingPressure} [{inspHistory[0].interpretation}]
+                      </div>
+                    )}
                   </div>
-                  {inspPause && (
-                    <div style={{ background: '#1a1500', border: '1px solid #f5c51866', borderRadius: 4, padding: '2px 8px', fontSize: '0.38rem', color: '#f5c518' }}>
-                      Pplat ≈ {Math.round(v.pplat)} cmH₂O
+
+                  <div style={{ width: 1, height: 90, background: C.sep }} />
+
+                  {/* Pausa Espiratoria */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'center', minWidth: 130 }}>
+                    <button
+                      type="button"
+                      onClick={() => triggerPauseManeuver(pauseManeuver === 'EXPIRATORY' ? 'NONE' : 'EXPIRATORY')}
+                      disabled={pauseManeuver === 'INSPIRATORY'}
+                      style={{
+                        padding: '8px 16px', cursor: 'pointer', minWidth: 120,
+                        background: pauseManeuver === 'EXPIRATORY' ? '#001220' : '#14141e',
+                        border: `2px solid ${pauseManeuver === 'EXPIRATORY' ? C.volume : C.border}`,
+                        borderRadius: 7, fontSize: '0.48rem', fontWeight: 900,
+                        letterSpacing: '0.1em', fontFamily: 'monospace',
+                        color: pauseManeuver === 'EXPIRATORY' ? C.volume : C.midText,
+                        boxShadow: pauseManeuver === 'EXPIRATORY' ? `0 0 15px ${C.volume}44` : 'none',
+                        opacity: pauseManeuver === 'INSPIRATORY' ? 0.4 : 1,
+                      }}
+                    >
+                      {pauseManeuver === 'EXPIRATORY' ? '⏱ MEDIENDO…' : '⏸ PAUSA ESP (3s)'}
+                    </button>
+                    <div style={{ fontSize: '0.34rem', color: C.dimText, textAlign: 'center', lineHeight: 1.4 }}>
+                      Flujo→0 · Mide <span style={{ color: C.volume }}>Auto-PEEP</span>
+                    </div>
+                    {pauseManeuver === 'EXPIRATORY' && (
+                      <div style={{ background: '#001218', border: `1px solid ${C.volume}44`, borderRadius: 4, padding: '2px 8px', fontSize: '0.38rem', color: C.volume }}>
+                        Midiendo Auto-PEEP…
+                      </div>
+                    )}
+                    {pauseManeuver === 'NONE' && expHistory.length > 0 && (
+                      <div style={{ fontSize: '0.34rem', color: EXP_COLORS[expHistory[0].interpretation], fontFamily: 'monospace' }}>
+                        Último: AP {expHistory[0].autoPEEP} [{expHistory[0].interpretation}]
+                      </div>
+                    )}
+                  </div>
+
+                  <div style={{ width: 1, height: 90, background: C.sep }} />
+
+                  {/* Ecuación de movimiento */}
+                  <div style={{ flex: 1, fontSize: '0.34rem', color: C.dimText, lineHeight: 1.8, fontFamily: 'monospace' }}>
+                    <div style={{ fontWeight: 700, color: C.midText, marginBottom: 4, fontSize: '0.36rem', letterSpacing: '0.1em' }}>
+                      ECUACIÓN DE MOVIMIENTO PULMONAR
+                    </div>
+                    <div>P<sub>aw</sub>(t) = V(t)/<span style={{ color: C.volume }}>C</span> + <span style={{ color: C.flow }}>V̇(t)</span>×<span style={{ color: C.pressure }}>R</span> + PEEP</div>
+                    <div style={{ marginTop: 2 }}>
+                      <span style={{ color: C.pressure }}>R</span> = (Ppico−Pplat)/Flujo&nbsp;·&nbsp;<span style={{ color: C.volume }}>C</span> = VT/(Pplat−PEEP)
+                    </div>
+                    <div style={{ marginTop: 2 }}>
+                      τ = <span style={{ color: C.accent }}>R×C</span> = constante de tiempo espiratoria
+                    </div>
+                  </div>
+                </div>
+
+                {/* ── HISTORIAL DE MANIOBRAS ── */}
+                <div style={{ borderTop: `1px solid ${C.sep}`, paddingTop: 8 }}>
+                  {/* Header historial */}
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                    <button
+                      type="button"
+                      onClick={() => setHistExpanded(v2 => !v2)}
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, color: C.midText, fontSize: '0.40rem', fontWeight: 700, letterSpacing: '0.1em', fontFamily: 'monospace', padding: 0 }}
+                    >
+                      {histExpanded ? '▾' : '▸'} HISTORIAL DE MANIOBRAS
+                      <span style={{ color: C.dimText, fontWeight: 400 }}>
+                        ({inspHistory.length}I / {expHistory.length}E)
+                      </span>
+                    </button>
+                    {histExpanded && (
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const rows: string[] = ['tipo,timestamp,Pplat/AutoPEEP,deltaP/totalPEEP,Cstat,modo,VT/RR,PEEP/I:E,interpretacion'];
+                            inspHistory.forEach(r => rows.push(`INSP,${fmtSimTime(r.simTimeS)},${r.pPlat},${r.drivingPressure},${r.cStat},${r.mode},${r.vtSet},${r.peepSet},${r.interpretation}`));
+                            expHistory.forEach(r => rows.push(`ESP,${fmtSimTime(r.simTimeS)},${r.autoPEEP},${r.totalPEEP},,${r.mode},${r.rrSet},${r.ieRatio},${r.interpretation}`));
+                            navigator.clipboard.writeText(rows.join('\n')).catch(() => undefined);
+                          }}
+                          style={{ fontSize: '0.36rem', fontWeight: 700, padding: '2px 6px', borderRadius: 4, cursor: 'pointer', background: '#1e293b', border: '1px solid #334155', color: '#94a3b8', fontFamily: 'monospace' }}
+                        >
+                          EXPORTAR CSV
+                        </button>
+                        {!confirmClear ? (
+                          <button type="button" onClick={() => setConfirmClear(true)}
+                            style={{ fontSize: '0.36rem', fontWeight: 700, padding: '2px 6px', borderRadius: 4, cursor: 'pointer', background: '#1e293b', border: '1px solid #334155', color: '#94a3b8', fontFamily: 'monospace' }}>
+                            LIMPIAR
+                          </button>
+                        ) : (
+                          <button type="button" onClick={() => { clearHistory(); setConfirmClear(false); }}
+                            style={{ fontSize: '0.36rem', fontWeight: 700, padding: '2px 6px', borderRadius: 4, cursor: 'pointer', background: '#7f1d1d', border: '1px solid #991b1b', color: '#fca5a5', fontFamily: 'monospace' }}>
+                            ¿CONFIRMAR?
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {histExpanded && (
+                    <div>
+                      {/* Sub-tabs */}
+                      <div style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
+                        {(['insp', 'exp'] as const).map(t => (
+                          <button type="button" key={t} onClick={() => setHistTab(t)}
+                            style={{ fontSize: '0.38rem', fontWeight: 700, padding: '2px 8px', borderRadius: 4, cursor: 'pointer', fontFamily: 'monospace',
+                              background: histTab === t ? (t === 'insp' ? '#1a1500' : '#001220') : '#14141e',
+                              border: `1px solid ${histTab === t ? (t === 'insp' ? '#f5c518' : C.volume) : C.border}`,
+                              color: histTab === t ? (t === 'insp' ? '#f5c518' : C.volume) : C.dimText,
+                            }}>
+                            {t === 'insp' ? `PAUSA INSP (${inspHistory.length})` : `PAUSA ESP (${expHistory.length})`}
+                          </button>
+                        ))}
+                      </div>
+
+                      {/* Tabla insp */}
+                      {histTab === 'insp' && (
+                        <div style={{ maxHeight: 140, overflowY: 'auto', fontFamily: 'monospace' }}>
+                          {inspHistory.length === 0 ? (
+                            <div style={{ color: C.dimText, fontSize: '0.36rem', padding: '4px 0' }}>Sin registros aún</div>
+                          ) : (
+                            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.34rem' }}>
+                              <thead>
+                                <tr style={{ color: C.dimText }}>
+                                  <th style={{ textAlign: 'left', padding: '2px 4px' }}>HH:MM:SS</th>
+                                  <th style={{ textAlign: 'right', padding: '2px 4px' }}>Pplat</th>
+                                  <th style={{ textAlign: 'right', padding: '2px 4px' }}>ΔP</th>
+                                  <th style={{ textAlign: 'right', padding: '2px 4px' }}>Cstat</th>
+                                  <th style={{ textAlign: 'right', padding: '2px 4px' }}>Modo</th>
+                                  <th style={{ textAlign: 'right', padding: '2px 4px' }}>VT</th>
+                                  <th style={{ textAlign: 'left', padding: '2px 4px' }}>Estado</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {inspHistory.map((r: InspPauseRecord) => {
+                                  const col = INSP_COLORS[r.interpretation];
+                                  return (
+                                    <tr key={r.id} style={{ borderTop: `1px solid ${C.sep}` }}>
+                                      <td style={{ padding: '2px 4px', color: C.midText }}>{fmtSimTime(r.simTimeS)}</td>
+                                      <td style={{ padding: '2px 4px', textAlign: 'right', color: '#f5c518' }}>{r.pPlat}</td>
+                                      <td style={{ padding: '2px 4px', textAlign: 'right', color: col, fontWeight: 700 }}>{r.drivingPressure}</td>
+                                      <td style={{ padding: '2px 4px', textAlign: 'right', color: C.midText }}>{r.cStat}</td>
+                                      <td style={{ padding: '2px 4px', textAlign: 'right', color: C.dimText }}>{r.mode}</td>
+                                      <td style={{ padding: '2px 4px', textAlign: 'right', color: C.dimText }}>{r.vtSet}</td>
+                                      <td style={{ padding: '2px 4px', color: col, fontWeight: 700 }}>{r.interpretation}</td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Tabla exp */}
+                      {histTab === 'exp' && (
+                        <div style={{ maxHeight: 140, overflowY: 'auto', fontFamily: 'monospace' }}>
+                          {expHistory.length === 0 ? (
+                            <div style={{ color: C.dimText, fontSize: '0.36rem', padding: '4px 0' }}>Sin registros aún</div>
+                          ) : (
+                            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.34rem' }}>
+                              <thead>
+                                <tr style={{ color: C.dimText }}>
+                                  <th style={{ textAlign: 'left', padding: '2px 4px' }}>HH:MM:SS</th>
+                                  <th style={{ textAlign: 'right', padding: '2px 4px' }}>Auto-PEEP</th>
+                                  <th style={{ textAlign: 'right', padding: '2px 4px' }}>Total PEEP</th>
+                                  <th style={{ textAlign: 'right', padding: '2px 4px' }}>FR</th>
+                                  <th style={{ textAlign: 'right', padding: '2px 4px' }}>I:E</th>
+                                  <th style={{ textAlign: 'left', padding: '2px 4px' }}>Estado</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {expHistory.map((r: ExpPauseRecord) => {
+                                  const col = EXP_COLORS[r.interpretation];
+                                  return (
+                                    <tr key={r.id} style={{ borderTop: `1px solid ${C.sep}` }}>
+                                      <td style={{ padding: '2px 4px', color: C.midText }}>{fmtSimTime(r.simTimeS)}</td>
+                                      <td style={{ padding: '2px 4px', textAlign: 'right', color: col, fontWeight: 700 }}>{r.autoPEEP}</td>
+                                      <td style={{ padding: '2px 4px', textAlign: 'right', color: C.volume }}>{r.totalPEEP}</td>
+                                      <td style={{ padding: '2px 4px', textAlign: 'right', color: C.dimText }}>{r.rrSet}</td>
+                                      <td style={{ padding: '2px 4px', textAlign: 'right', color: C.dimText }}>{r.ieRatio}</td>
+                                      <td style={{ padding: '2px 4px', color: col, fontWeight: 700 }}>{r.interpretation}</td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          )}
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
 
-                <div style={{ width: 1, height: 80, background: C.sep }} />
-
-                {/* Pausa Espiratoria */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'center', minWidth: 120 }}>
-                  <button
-                    type="button"
-                    onMouseDown={() => setExpPause(true)}
-                    onMouseUp={() => setExpPause(false)}
-                    onTouchStart={() => setExpPause(true)}
-                    onTouchEnd={() => setExpPause(false)}
-                    style={{
-                      padding: '8px 16px',
-                      background: expPause ? '#001220' : '#14141e',
-                      border: `2px solid ${expPause ? C.volume : C.border}`,
-                      borderRadius: 7, cursor: 'pointer',
-                      fontSize: '0.48rem', fontWeight: 900, letterSpacing: '0.1em',
-                      color: expPause ? C.volume : C.midText,
-                      fontFamily: 'monospace',
-                      boxShadow: expPause ? `0 0 15px ${C.volume}44` : 'none',
-                      transition: 'all 0.1s',
-                      minWidth: 110,
-                    }}
-                  >
-                    {expPause ? '⏸ EN PAUSA' : '⏸ PAUSA ESP'}
-                  </button>
-                  <div style={{ fontSize: '0.34rem', color: C.dimText, textAlign: 'center', lineHeight: 1.4 }}>
-                    Mantener presionado<br />
-                    Flujo→0 · Revela <span style={{ color: C.volume }}>Auto-PEEP</span>
-                  </div>
-                  {expPause && (
-                    <div style={{ background: '#001218', border: `1px solid ${C.volume}44`, borderRadius: 4, padding: '2px 8px', fontSize: '0.38rem', color: C.volume }}>
-                      PEEP total ≈ {Math.round(vent.peep)} cmH₂O
-                    </div>
-                  )}
-                </div>
-
-                <div style={{ width: 1, height: 80, background: C.sep }} />
-
-                {/* Leyenda Ecuación de Movimiento */}
-                <div style={{ flex: 1, fontSize: '0.34rem', color: C.dimText, lineHeight: 1.8, fontFamily: 'monospace' }}>
-                  <div style={{ fontWeight: 700, color: C.midText, marginBottom: 4, fontSize: '0.36rem', letterSpacing: '0.1em' }}>
-                    ECUACIÓN DE MOVIMIENTO PULMONAR
-                  </div>
-                  <div>P<sub>aw</sub>(t) = V(t) / <span style={{ color: C.volume }}>C</span> + <span style={{ color: C.flow }}>V̇(t)</span> × <span style={{ color: C.pressure }}>R</span> + PEEP</div>
-                  <div style={{ marginTop: 2 }}>
-                    <span style={{ color: C.pressure }}>R</span> = (Ppico−Pplat) / Flujo·s⁻¹
-                    &nbsp;·&nbsp;
-                    <span style={{ color: C.volume }}>C</span> = VT / (Pplat−PEEP)
-                  </div>
-                  <div style={{ marginTop: 2 }}>
-                    τ = <span style={{ color: C.accent }}>R×C</span> = constante de tiempo espiratoria
-                  </div>
-                </div>
               </div>
             )}
 

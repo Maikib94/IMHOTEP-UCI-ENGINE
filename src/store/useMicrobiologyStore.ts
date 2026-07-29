@@ -62,14 +62,17 @@ export type CultureSiteType =
   // ── 8. Panel Viral (PCR Multiplex) ───────────────────────────────────────
   | 'viral_panel_blood'      // Panel viral sangre: CMV, EBV, HSV, VZV, Dengue, HIV
   | 'viral_panel_csf'        // Panel viral LCR: HSV-1/2, VZV, EV, EBV, CMV, Parechovirus, WNV
-  | 'viral_panel_resp';      // Panel viral resp: Influenza A/B, RSV, SARS-CoV-2, Parainfluenza, hMPV, Adenovirus
+  | 'viral_panel_resp'       // Panel viral resp: Influenza A/B, RSV, SARS-CoV-2, Parainfluenza, hMPV, Adenovirus
+  // ── 9. Urocultivo ────────────────────────────────────────────────────────
+  | 'urine_catheter'         // Urocultivo por sonda Foley (técnica aséptica)
+  | 'urine_midstream';       // Urocultivo chorro medio (sin sonda)
 
 
 // ─── Especificación de Sitio de Cultivo ──────────────────────────────────────
 export interface CultureSiteSpec {
   id:              CultureSiteType;
   displayName:     string;
-  category:        'hemoculture' | 'catheter_retro' | 'catheter_tip' | 'csf' | 'body_fluid' | 'respiratory' | 'molecular' | 'viral';
+  category:        'hemoculture' | 'catheter_retro' | 'catheter_tip' | 'csf' | 'body_fluid' | 'respiratory' | 'molecular' | 'viral' | 'urology';
   turnaroundHours: number;       // Horas simuladas para resultado
   requiresCatheterRemoval: boolean;
   additionalTests: string[];     // Exámenes adicionales incluidos
@@ -224,6 +227,23 @@ export const CULTURE_SITE_CATALOG: Record<CultureSiteType, CultureSiteSpec> = {
       'Metapneumovirus humano (hMPV)', 'Adenovirus',
       'Rinovirus/Enterovirus', 'Bocavirus', 'Coronavirus 229E/OC43/NL63/HKU1'
     ], quantitative: false, isBundleItem: false, icon: '🦠',
+  },
+
+  // ── 9. Urocultivos ────────────────────────────────────────────────────────
+  // Wen Y et al. PLoS ONE 2025;20(4):e0322088 — epidemiología ITU UCI
+  // Islam MA et al. PLoS ONE 2022;17(9):e0274423 — E. coli 51.6%
+  // Shkalim Zemer V et al. Pathogens 2024;13(8):671 — ESBL comunidad 6→25%
+  urine_catheter: {
+    id: 'urine_catheter', displayName: 'Urocultivo — Sonda Foley',
+    category: 'urology', turnaroundHours: 24, requiresCatheterRemoval: false,
+    additionalTests: ['Gram orina', 'Leucocitos', 'Nitritos', 'Antibiograma completo'],
+    quantitative: true, isBundleItem: false, icon: '🧪',
+  },
+  urine_midstream: {
+    id: 'urine_midstream', displayName: 'Urocultivo — Chorro Medio',
+    category: 'urology', turnaroundHours: 24, requiresCatheterRemoval: false,
+    additionalTests: ['Gram orina', 'Sedimento urinario', 'Antibiograma completo'],
+    quantitative: true, isBundleItem: false, icon: '🧫',
   },
 };
 
@@ -1418,11 +1438,15 @@ export interface Culture {
 // INTERFACES DE ESTADO DINÁMICO (igual que antes)
 // ══════════════════════════════════════════════════════════════════════════════
 
+export type AntibioticInfusionMode = 'intermittent' | 'continuous' | 'extended_interval';
+
 export interface ActiveAntibiotic {
   antibioticId:        string;
   startedAt:           number;
   lastDoseAt:          number;
   extendedInfusion:    boolean;
+  infusionMode:        AntibioticInfusionMode;
+  loadingDoseGiven:    boolean;
   serumConcentration:  number;
   troughLevel:         number;
   auc24:               number;
@@ -1525,8 +1549,15 @@ export function getVademecum(): VademecumEntry[] {
 // STORE ZUSTAND
 // ══════════════════════════════════════════════════════════════════════════════
 
+// ─── Estado adicional de desafío empírico ─────────────────────────────────────
+// cultureRequestedAt: mapa siteType → timestamp de solicitud (para ETA preciso)
+export type CultureRequestMap = Partial<Record<CultureSiteType, number>>;
+
 interface MicrobiologyState {
   hiddenPathogenId:          string | null;
+  /** Germen revelado al usuario SOLO cuando el cultivo se resuelve positivo.
+   *  null = desconocido (pendiente de cultivos). */
+  revealedGerm:              string | null;
   cultures:                  Culture[];
   activeAntibiotics:         ActiveAntibiotic[];
   activeAdjunctDrugs:        ActiveAdjunctDrug[];
@@ -1535,14 +1566,27 @@ interface MicrobiologyState {
   rose:                      ROSEState;
   sscBundle:                 SSCBundle;
 
+  // ─── Estado empírico ──────────────────────────────────────────────────────
+  /** Mapa de timestamps de solicitud de cultivo por sitio */
+  cultureRequestedAt:       CultureRequestMap;
+  /** Factor de ingreso: cultivo positivo ya disponible al inicio (15%) */
+  admissionCultureAvailable: boolean;
+  /** ID del patógeno disponible al ingreso (si admissionCultureAvailable) */
+  admissionPathogenId:       string | null;
+  /** Cobertura empírica apropiada — true si ATB activos cubren el germen */
+  appropriateCoverage:       boolean;
+
   // ─── Actions ──────────────────────────────────────────────────────────────
   assignPathogen:    (pathogenId: string) => void;
+  /** Called by MicrobiologyEngine when a culture resolves → reveals germ to UI */
+  revealGerm:        (pathogenId: string | null) => void;
   orderCulture:      (siteType: CultureSiteType, simElapsed: number) => void;
   startAntibiotic:   (antibioticId: string, simElapsed: number, extended?: boolean) => void;
   stopAntibiotic:    (antibioticId: string) => void;
   startAdjunctDrug:  (drugId: string, simElapsed: number) => void;
   stopAdjunctDrug:   (drugId: string) => void;
   markBundleItem:    (item: keyof Pick<SSCBundle, 'lactateOrdered' | 'bloodCulturesDrawn' | 'antibioticsStarted' | 'fluidBolusSent' | 'vasopressorsStarted'>) => void;
+  setAdmissionCulture: (available: boolean, pathogenId: string | null) => void;
   resetMicrobiology: () => void;
   _engineUpdate:     (patch: Partial<MicrobiologyState>) => void;
 }
@@ -1563,6 +1607,8 @@ const INITIAL_BUNDLE: SSCBundle = {
 export const useMicrobiologyStore = create<MicrobiologyState>((set, get) => ({
 
   hiddenPathogenId:          null,
+  revealedGerm:              null,
+  appropriateCoverage:       false,
   cultures:                  [],
   activeAntibiotics:         [],
   activeAdjunctDrugs:        [],
@@ -1571,8 +1617,14 @@ export const useMicrobiologyStore = create<MicrobiologyState>((set, get) => ({
   rose:                      { ...INITIAL_ROSE },
   sscBundle:                 { ...INITIAL_BUNDLE },
 
+  // ── Estado empírico ─────────────────────────────────────────────────────
+  cultureRequestedAt:        {},
+  admissionCultureAvailable: false,
+  admissionPathogenId:       null,
+
   // ── Asignar patógeno ───────────────────────────────────────────────────────
   assignPathogen: (pathogenId) => set({ hiddenPathogenId: pathogenId }),
+  revealGerm: (pathogenId) => set({ revealedGerm: pathogenId }),
 
   // ── Ordenar cultivo — soporte completo de CultureSiteType ─────────────────
   orderCulture: (siteType, simElapsed) => {
@@ -1610,7 +1662,17 @@ export const useMicrobiologyStore = create<MicrobiologyState>((set, get) => ({
       // bloodCulturesDrawn solo true cuando AMBOS tomados
       newBundle.bloodCulturesDrawn = newBundle.hemoculture1Drawn && newBundle.hemoculture2Drawn;
 
-      return { cultures: [...s.cultures, culture], sscBundle: newBundle };
+      // Registrar timestamp de solicitud para ETA en EmpiricalTherapyPanel
+      const updatedRequestedAt = {
+        ...s.cultureRequestedAt,
+        [siteType]: simElapsed,
+      };
+
+      return {
+        cultures: [...s.cultures, culture],
+        sscBundle: newBundle,
+        cultureRequestedAt: updatedRequestedAt,
+      };
     });
   },
 
@@ -1620,9 +1682,19 @@ export const useMicrobiologyStore = create<MicrobiologyState>((set, get) => ({
     const existing = get().activeAntibiotics.find(a => a.antibioticId === antibioticId);
     if (existing) return;
 
+    const def = ANTIBIOTIC_CATALOG[antibioticId];
+    // Derive infusionMode from pkpdType and extended flag
+    const infusionMode: AntibioticInfusionMode =
+      def.pkpdType === 'conc' ? 'extended_interval'
+      : def.pkpdType === 'auc' ? 'intermittent'
+      : extended ? 'continuous' : 'intermittent';
+
     const atb: ActiveAntibiotic = {
       antibioticId, startedAt: simElapsed, lastDoseAt: simElapsed,
-      extendedInfusion: extended, serumConcentration: 0,
+      extendedInfusion: extended,
+      infusionMode,
+      loadingDoseGiven: false,
+      serumConcentration: 0,
       troughLevel: 0, auc24: 0, timeSinceLastDose: 0, tAboveMIC: 0,
     };
     set((s) => ({
@@ -1662,11 +1734,18 @@ export const useMicrobiologyStore = create<MicrobiologyState>((set, get) => ({
   markBundleItem: (item) =>
     set((s) => ({ sscBundle: { ...s.sscBundle, [item]: true } })),
 
+  setAdmissionCulture: (available, pathogenId) =>
+    set({ admissionCultureAvailable: available, admissionPathogenId: pathogenId }),
+
   resetMicrobiology: () => set({
-    hiddenPathogenId: null, cultures: [], activeAntibiotics: [],
+    hiddenPathogenId: null, revealedGerm: null, appropriateCoverage: false,
+    cultures: [], activeAntibiotics: [],
     activeAdjunctDrugs: [], treatmentEfficacy: 'none',
     sepsisProgressionModifier: 1.0,
     rose: { ...INITIAL_ROSE }, sscBundle: { ...INITIAL_BUNDLE },
+    cultureRequestedAt: {},
+    admissionCultureAvailable: false,
+    admissionPathogenId: null,
   }),
 
   _engineUpdate: (patch) => set(patch),

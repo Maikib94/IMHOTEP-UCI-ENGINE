@@ -18,7 +18,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import React, { useEffect, useRef } from 'react';
-import { VentilatorSV800Engine } from '../core/VentilatorSV800Engine';
+import { RespiratoryEngine } from '../core/RespiratoryEngine';
 
 interface Props {
   width?: number;
@@ -35,7 +35,7 @@ interface Props {
 
 function pawToHSL(paw: number): string {
   // Interpolación lineal en HSL por tramos
-  if (paw <= 5)       return `hsl(188, 83%, 53%)`;
+  if (paw <= 5) return `hsl(188, 83%, 53%)`;
   if (paw <= 15) {
     const t = (paw - 5) / 10;
     return `hsl(${188 + (158 - 188) * t}, ${83 + (64 - 83) * t}%, ${53 - 1 * t}%)`;
@@ -113,7 +113,7 @@ export const GeometricLung: React.FC<Props> = ({
   const seedRef = useRef<number>(Math.random() * Math.PI * 2);
 
   useEffect(() => {
-    const engine = VentilatorSV800Engine.getInstance();
+    const engine = RespiratoryEngine.getInstance().getVentEngine();
     const cx = width / 2;
     const cy = height / 2;
     const rMax = Math.min(width, height) * 0.38;
@@ -170,9 +170,9 @@ export const GeometricLung: React.FC<Props> = ({
 
       // Etiquetas numéricas
       if (showNumeric) {
-        if (txtVolRef.current)  txtVolRef.current.textContent  = `${Math.round(st.vol)} mL`;
-        if (txtPawRef.current)  txtPawRef.current.textContent  = `${st.paw.toFixed(1)} cmH₂O`;
-        if (txtCrsRef.current)  txtCrsRef.current.textContent  = `${crs.toFixed(0)} mL/cmH₂O`;
+        if (txtVolRef.current) txtVolRef.current.textContent = `${Math.round(st.vol)} mL`;
+        if (txtPawRef.current) txtPawRef.current.textContent = `${st.paw.toFixed(1)} cmH₂O`;
+        if (txtCrsRef.current) txtCrsRef.current.textContent = `${crs.toFixed(0)} mL/cmH₂O`;
         if (txtModeRef.current) txtModeRef.current.textContent = breath.acpFlag ? 'ACP ⚠' : 'STABLE';
         if (txtModeRef.current) txtModeRef.current.setAttribute('fill', breath.acpFlag ? '#ef4444' : '#a3e635');
       }
@@ -201,7 +201,7 @@ export const GeometricLung: React.FC<Props> = ({
       <defs>
         <pattern id="gl-grid" width="20" height="20" patternUnits="userSpaceOnUse">
           <path d="M 20 0 L 0 0 0 20" fill="none"
-                stroke="rgba(255,255,255,0.025)" strokeWidth="1" />
+            stroke="rgba(255,255,255,0.025)" strokeWidth="1" />
         </pattern>
         <filter id="gl-blur">
           <feGaussianBlur stdDeviation="4" />
@@ -260,21 +260,21 @@ export const GeometricLung: React.FC<Props> = ({
 
           {/* Top-right: Paw */}
           <text x={width - 14} y={20} textAnchor="end"
-                fill="#94a3b8" fontSize={9} letterSpacing="0.1em">P_AW</text>
+            fill="#94a3b8" fontSize={9} letterSpacing="0.1em">P_AW</text>
           <text ref={txtPawRef} x={width - 14} y={34} textAnchor="end"
-                fill="#34d399" fontSize={14} fontWeight={600}>--</text>
+            fill="#34d399" fontSize={14} fontWeight={600}>--</text>
 
           {/* Bottom-left: Crs */}
           <text x={14} y={height - 22} fill="#94a3b8" fontSize={9}
-                letterSpacing="0.1em">C_RS</text>
+            letterSpacing="0.1em">C_RS</text>
           <text ref={txtCrsRef} x={14} y={height - 8} fill="#a3e635" fontSize={12}
-                fontWeight={600}>--</text>
+            fontWeight={600}>--</text>
 
           {/* Bottom-right: mode/flag */}
           <text x={width - 14} y={height - 22} textAnchor="end"
-                fill="#94a3b8" fontSize={9} letterSpacing="0.1em">STATE</text>
+            fill="#94a3b8" fontSize={9} letterSpacing="0.1em">STATE</text>
           <text ref={txtModeRef} x={width - 14} y={height - 8} textAnchor="end"
-                fontSize={12} fontWeight={700}>STABLE</text>
+            fontSize={12} fontWeight={700}>STABLE</text>
         </g>
       )}
     </svg>

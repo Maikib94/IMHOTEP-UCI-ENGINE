@@ -1,10 +1,11 @@
 import React, { useEffect, useRef, useMemo } from 'react';
-import { usePatientStore } from '../store/usePatientStore';
+import { usePatientStore }  from '../store/usePatientStore';
+import { usePathologyStore } from '../store/usePathologyStore';
+import type { ProceduresState } from '../store/usePatientStore';
+import type { CaseCategory }    from '../store/usePathologyStore';
 
 // ─── Configuración canvas ─────────────────────────────────────────────────────
-const NUM_CH = 6;
 const CH_H = 80;
-const CANVAS_H = NUM_CH * CH_H;
 const LABEL_W = 60;
 const SCAN_PX_S = 80;
 const ERASE_W = 12;
@@ -13,18 +14,41 @@ const SEP_COLOR = '#1a3050';
 const GRID_SMALL = '#0a1c32';
 const GRID_LARGE = '#0f2844';
 
-// Escalas de visualización por canal (representa el rango mmHg o % del eje Y)
-const ART_DISPLAY_MAX = 200;  // canvas 0→1 representa 0→200 mmHg ART
-const ETCO2_DISPLAY_MAX = 60;  // canvas 0→1 representa 0→60 mmHg EtCO₂
-const ICP_DISPLAY_MAX = 40;   // canvas 0→1 representa 0→40 mmHg PIC
+// Escalas de visualización por canal
+const ART_DISPLAY_MAX  = 200;
+const ETCO2_DISPLAY_MAX = 60;
+const ICP_DISPLAY_MAX  = 40;
 
-const CH = [
-  { label: 'ECG', color: '#00ff88', unit: 'bpm' },
-  { label: 'ART', color: '#ff4444', unit: 'mmHg' },
-  { label: 'PLETH', color: '#00cfff', unit: '%' },
-  { label: 'EtCO2', color: '#ffdd00', unit: 'mmHg' },
+interface ChannelDef { id: string; label: string; color: string; unit: string; }
+
+function buildVisibleChannels(
+  procedures: ProceduresState,
+  caseCategory: CaseCategory,
+): ChannelDef[] {
+  const channels: ChannelDef[] = [
+    { id: 'ECG',   label: 'ECG',   color: '#00ff88', unit: 'bpm'   },
+  ];
+  if (procedures.arterialLine) {
+    channels.push({ id: 'ART', label: 'ART', color: '#ff4444', unit: 'mmHg' });
+  }
+  channels.push({ id: 'PLETH', label: 'PLETH', color: '#00cfff', unit: '%'    });
+  channels.push({ id: 'EtCO2', label: 'EtCO₂', color: '#ffdd00', unit: 'mmHg' });
+  channels.push({ id: 'RESP',  label: 'RESP',  color: '#aaaaaa', unit: 'br/m' });
+  if (procedures.picMonitor || caseCategory === 'neuro') {
+    channels.push({ id: 'PIC', label: 'PIC', color: '#c084fc', unit: 'mmHg' });
+  }
+  return channels;
+}
+
+// Legacy static array — kept only for drawLabels / getAmp index references.
+// Dynamic channels are now computed in the component via buildVisibleChannels.
+const CH_STATIC = [
+  { label: 'ECG', color: '#00ff88', unit: 'bpm'   },
+  { label: 'ART', color: '#ff4444', unit: 'mmHg'  },
+  { label: 'PLETH',color: '#00cfff', unit: '%'    },
+  { label: 'EtCO2',color: '#ffdd00', unit: 'mmHg' },
   { label: 'RESP', color: '#aaaaaa', unit: 'br/m' },
-  { label: 'PIC', color: '#c084fc', unit: 'mmHg' },
+  { label: 'PIC',  color: '#c084fc', unit: 'mmHg' },
 ];
 
 // ─── Formas de onda — ESCALADAS con valores vitales reales ────────────────────
@@ -194,16 +218,22 @@ function waveICP(ph: number, icp: number): number {
 
 // ─── Dispatcher ───────────────────────────────────────────────────────────────
 type VS = ReturnType<typeof usePatientStore.getState>['vitals'];
-function getAmp(ch: number, phase: number, v: VS): number {
-  switch (ch) {
-    case 0: return waveECG(phase, isFinite(v.heartRate) ? v.heartRate : 75);
-    case 1: return waveART(phase, isFinite(v.systolicBP) ? v.systolicBP : 120, isFinite(v.diastolicBP) ? v.diastolicBP : 80);
-    case 2: return wavePLETH(phase, v);
-    case 3: return waveETCO2(phase, isFinite(v.etco2) ? v.etco2 : 38);
-    case 4: return waveRESP(phase, isFinite(v.respiratoryRate) ? v.respiratoryRate : 14);
-    case 5: return waveICP(phase, isFinite(v.icp) ? v.icp : 12);
-    default: return 0.5;
+function getAmpById(channelId: string, phase: number, v: VS): number {
+  switch (channelId) {
+    case 'ECG':   return waveECG(phase, isFinite(v.heartRate) ? v.heartRate : 75);
+    case 'ART':   return waveART(phase, isFinite(v.systolicBP) ? v.systolicBP : 120, isFinite(v.diastolicBP) ? v.diastolicBP : 80);
+    case 'PLETH': return wavePLETH(phase, v);
+    case 'EtCO2': return waveETCO2(phase, isFinite(v.etco2) ? v.etco2 : 38);
+    case 'RESP':  return waveRESP(phase, isFinite(v.respiratoryRate) ? v.respiratoryRate : 14);
+    case 'PIC':   return waveICP(phase, isFinite(v.icp) ? v.icp : 12);
+    default:      return 0.5;
   }
+}
+
+// Legacy index-based wrapper — used internally during canvas render
+function getAmp(ch: number, phase: number, v: VS): number {
+  const ids = ['ECG','ART','PLETH','EtCO2','RESP','PIC'];
+  return getAmpById(ids[ch] ?? 'ECG', phase, v);
 }
 
 function ampToY(ch: number, amp: number): number {
@@ -212,27 +242,28 @@ function ampToY(ch: number, amp: number): number {
   return Math.round(ch * CH_H + margin + (1 - clamped) * (CH_H - margin * 2));
 }
 
-function buildGrid(W: number): HTMLCanvasElement {
+function buildGrid(W: number, numCh: number): HTMLCanvasElement {
+  const canvasH = numCh * CH_H;
   const gc = document.createElement('canvas');
   gc.width = W;
-  gc.height = CANVAS_H;
+  gc.height = canvasH;
   const ctx = gc.getContext('2d');
   if (!ctx) return gc;
 
   ctx.fillStyle = BG_COLOR;
-  ctx.fillRect(0, 0, W, CANVAS_H);
+  ctx.fillRect(0, 0, W, canvasH);
   ctx.strokeStyle = GRID_SMALL; ctx.lineWidth = 0.5;
-  for (let x = LABEL_W; x <= W; x += 4) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, CANVAS_H); ctx.stroke(); }
-  for (let y = 0; y <= CANVAS_H; y += 4) { ctx.beginPath(); ctx.moveTo(LABEL_W, y); ctx.lineTo(W, y); ctx.stroke(); }
+  for (let x = LABEL_W; x <= W; x += 4) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvasH); ctx.stroke(); }
+  for (let y = 0; y <= canvasH; y += 4) { ctx.beginPath(); ctx.moveTo(LABEL_W, y); ctx.lineTo(W, y); ctx.stroke(); }
 
   ctx.strokeStyle = GRID_LARGE; ctx.lineWidth = 1;
-  for (let x = LABEL_W; x <= W; x += 20) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, CANVAS_H); ctx.stroke(); }
-  for (let y = 0; y <= CANVAS_H; y += 20) { ctx.beginPath(); ctx.moveTo(LABEL_W, y); ctx.lineTo(W, y); ctx.stroke(); }
+  for (let x = LABEL_W; x <= W; x += 20) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvasH); ctx.stroke(); }
+  for (let y = 0; y <= canvasH; y += 20) { ctx.beginPath(); ctx.moveTo(LABEL_W, y); ctx.lineTo(W, y); ctx.stroke(); }
 
   ctx.strokeStyle = SEP_COLOR; ctx.lineWidth = 1;
-  for (let i = 1; i < NUM_CH; i++) { ctx.beginPath(); ctx.moveTo(0, i * CH_H); ctx.lineTo(W, i * CH_H); ctx.stroke(); }
+  for (let i = 1; i < numCh; i++) { ctx.beginPath(); ctx.moveTo(0, i * CH_H); ctx.lineTo(W, i * CH_H); ctx.stroke(); }
 
-  ctx.beginPath(); ctx.moveTo(LABEL_W, 0); ctx.lineTo(LABEL_W, CANVAS_H); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(LABEL_W, 0); ctx.lineTo(LABEL_W, canvasH); ctx.stroke();
   return gc;
 }
 
@@ -310,113 +341,107 @@ function drawLabels(
   } else {
     spo2Display = spo2Real !== -1 ? String(spo2Real) : '--';
     spo2Unit = '%';
-    spo2SensorColor = CH[2].color;
+    spo2SensorColor = CH_STATIC[2].color;
   }
 
-  const hrStatus = getVitalStatus(hr, CH[0].color, { crit_low: 40, warn_low: 55, warn_high: 120, crit_high: 140 });
-  const artStatus = getVitalStatus(map, CH[1].color, { crit_low: 65, warn_high: 110, crit_high: 130 });
-  const spo2Status = getVitalStatus(spo2Real, spo2SensorColor, { crit_low: 88, warn_low: 92 });
-  const etco2Status = getVitalStatus(etco2, CH[3].color, { crit_low: 25, warn_low: 35, warn_high: 50, crit_high: 65 });
-  const rrStatus = getVitalStatus(rr, CH[4].color, { crit_low: 8, warn_low: 12, warn_high: 28, crit_high: 35 });
-  const icpStatus = getVitalStatus(icp, CH[5].color, { warn_high: 20, crit_high: 30 });
+  const hrStatus   = getVitalStatus(hr,      CH_STATIC[0].color, { crit_low: 40, warn_low: 55, warn_high: 120, crit_high: 140 });
+  const artStatus  = getVitalStatus(map,     CH_STATIC[1].color, { crit_low: 65, warn_high: 110, crit_high: 130 });
+  const spo2Status = getVitalStatus(spo2Real,spo2SensorColor,    { crit_low: 88, warn_low: 92 });
+  const etco2Status= getVitalStatus(etco2,   CH_STATIC[3].color, { crit_low: 25, warn_low: 35, warn_high: 50, crit_high: 65 });
+  const rrStatus   = getVitalStatus(rr,      CH_STATIC[4].color, { crit_low: 8, warn_low: 12, warn_high: 28, crit_high: 35 });
+  const icpStatus  = getVitalStatus(icp,     CH_STATIC[5].color, { warn_high: 20, crit_high: 30 });
   const cppColor = cpp < 50 ? '#ef4444' : cpp < 60 ? '#f97316' : '#a3e635';
 
   if (sensor !== 'normal') {
     spo2Status.color = spo2SensorColor;
   }
 
-  const vals = [
-    hr !== -1 ? String(hr) : '--',
-    sbp !== -1 && dbp !== -1 ? `${sbp}/${dbp}` : '--/--',
-    spo2Display,
-    etco2 !== -1 ? String(etco2) : '--',
-    rr !== -1 ? String(rr) : '--',
-    icp !== -1 ? String(icp) : '--',
-  ];
-  const units = [
-    CH[0].unit,
-    map !== -1 ? `(${Math.round(map)})` : '',
-    spo2Unit,
-    CH[3].unit,
-    CH[4].unit,
-    cpp !== -1 ? `CPP:${cpp}` : 'CPP:--',
-  ];
-  const colors = [hrStatus.color, artStatus.color, spo2Status.color, etco2Status.color, rrStatus.color, icpStatus.color];
-  const statuses = [hrStatus, artStatus, spo2Status, etco2Status, rrStatus, icpStatus];
-  const blinks = statuses.map(s => s.level === 'critical');
-  blinks[2] = blinks[2] || sensor === 'fail';
+  // Build per-channel display data by channel ID
+  const chData: { val: string; unit: string; color: string; blink: boolean; extra?: string }[] = [];
 
-  let highestAlarmLevel: 'none' | 'warning' | 'critical' = 'none';
-  if (blinks.some(b => b)) {
-    highestAlarmLevel = 'critical';
-  } else if (statuses.some(s => s.level === 'warning')) {
-    highestAlarmLevel = 'warning';
+  for (const ch of (stRef.current as any).visibleChs as ChannelDef[]) {
+    switch (ch.id) {
+      case 'ECG':
+        chData.push({ val: hr !== -1 ? String(hr) : '--', unit: ch.unit, color: hrStatus.color, blink: hrStatus.level === 'critical' });
+        break;
+      case 'ART':
+        chData.push({ val: sbp !== -1 && dbp !== -1 ? `${sbp}/${dbp}` : '--/--', unit: map !== -1 ? `(${Math.round(map)})` : '', color: artStatus.color, blink: artStatus.level === 'critical' });
+        break;
+      case 'PLETH':
+        chData.push({ val: spo2Display, unit: spo2Unit, color: spo2Status.color, blink: spo2Status.level === 'critical' || sensor === 'fail', extra: 'PI:' + (isFinite(pi) ? pi.toFixed(2) : '--') });
+        break;
+      case 'EtCO2':
+        chData.push({ val: etco2 !== -1 ? String(etco2) : '--', unit: ch.unit, color: etco2Status.color, blink: etco2Status.level === 'critical' });
+        break;
+      case 'RESP':
+        chData.push({ val: rr !== -1 ? String(rr) : '--', unit: ch.unit, color: rrStatus.color, blink: rrStatus.level === 'critical' });
+        break;
+      case 'PIC':
+        chData.push({ val: icp !== -1 ? String(icp) : '--', unit: cpp !== -1 ? `CPP:${cpp}` : 'CPP:--', color: icpStatus.color, blink: icpStatus.level === 'critical', extra: icp > 20 && icp !== -1 ? 'P2>P1' : undefined });
+        break;
+      default:
+        chData.push({ val: '--', unit: '', color: '#446688', blink: false });
+    }
   }
 
+  let highestAlarmLevel: 'none' | 'warning' | 'critical' = 'none';
+  const statuses = [hrStatus, artStatus, spo2Status, etco2Status, rrStatus, icpStatus];
+  if (chData.some(d => d.blink)) highestAlarmLevel = 'critical';
+  else if (statuses.some(s => s.level === 'warning')) highestAlarmLevel = 'warning';
+
   const audioCriticalEl = audioCriticalRef.current;
-  const audioWarningEl = audioWarningRef.current;
+  const audioWarningEl  = audioWarningRef.current;
   if (highestAlarmLevel !== stRef.current.alarmLevel) {
     if (audioCriticalEl) { audioCriticalEl.pause(); audioCriticalEl.currentTime = 0; }
-    if (audioWarningEl) { audioWarningEl.pause(); audioWarningEl.currentTime = 0; }
-
-    if (highestAlarmLevel === 'critical' && audioCriticalEl) {
-      audioCriticalEl.play().catch(e => console.warn("Error al reproducir sonido de alarma crítica:", e));
-    } else if (highestAlarmLevel === 'warning' && audioWarningEl) {
-      audioWarningEl.play().catch(e => console.warn("Error al reproducir sonido de advertencia:", e));
-    }
+    if (audioWarningEl)  { audioWarningEl.pause();  audioWarningEl.currentTime  = 0; }
+    if (highestAlarmLevel === 'critical' && audioCriticalEl)
+      audioCriticalEl.play().catch(e => console.warn('alarm:', e));
+    else if (highestAlarmLevel === 'warning' && audioWarningEl)
+      audioWarningEl.play().catch(e => console.warn('alarm:', e));
     stRef.current.alarmLevel = highestAlarmLevel;
   }
 
-  for (let i = 0; i < NUM_CH; i++) {
+  const vChs = (stRef.current as any).visibleChs as ChannelDef[];
+  const canvasH = vChs.length * CH_H;
+
+  for (let i = 0; i < vChs.length; i++) {
+    const ch = vChs[i];
+    const d  = chData[i];
     const top = i * CH_H;
     ctx.fillStyle = BG_COLOR;
     ctx.fillRect(0, top, LABEL_W - 1, CH_H);
 
-    let valueColor = colors[i];
-    if (blinks[i] && blink) {
-      valueColor = BG_COLOR;
-    }
-
-    ctx.fillStyle = colors[i];
+    ctx.fillStyle = d.color;
     ctx.font = 'bold 10px "JetBrains Mono", monospace';
-    ctx.fillText(CH[i].label, 4, top + 15);
+    ctx.fillText(ch.label, 4, top + 15);
 
+    const valueColor = (d.blink && blink) ? BG_COLOR : d.color;
     ctx.fillStyle = valueColor;
-    const isLong = vals[i].length > 4;
+    const isLong = d.val.length > 4;
     ctx.font = `bold ${isLong ? '11px' : '13px'} "JetBrains Mono", monospace`;
-    ctx.fillText(vals[i], 2, top + 37);
+    ctx.fillText(d.val, 2, top + 37);
 
-    if (i === 1) {
-      ctx.fillStyle = '#446688';
-      ctx.font = '9px "JetBrains Mono", monospace';
-      ctx.fillText(units[i], 2, top + 51);
-    } else if (i === 2) {
-      ctx.fillStyle = sensor !== 'normal' ? spo2SensorColor : '#446688';
-      ctx.font = `bold ${sensor !== 'normal' ? '7px' : '9px'} "JetBrains Mono", monospace`;
-      ctx.fillText(units[i], 2, top + 51);
-      ctx.fillStyle = '#2a3a4a';
-      ctx.font = '8px "JetBrains Mono", monospace';
-      ctx.fillText('PI:' + (isFinite(pi) ? pi.toFixed(2) : '--'), 2, top + 63);
-    } else if (i === 5) {
+    if (ch.id === 'PIC') {
       ctx.fillStyle = cppColor;
       ctx.font = 'bold 8px "JetBrains Mono", monospace';
-      ctx.fillText(units[i], 2, top + 51);
-      if (icp > 20 && icp !== -1) {
-        ctx.fillStyle = icpStatus.color;
-        ctx.font = '7px "JetBrains Mono", monospace';
-        ctx.fillText('P2>P1', 2, top + 63);
-      }
+      ctx.fillText(d.unit, 2, top + 51);
+      if (d.extra) { ctx.fillStyle = icpStatus.color; ctx.font = '7px "JetBrains Mono", monospace'; ctx.fillText(d.extra, 2, top + 63); }
+    } else if (ch.id === 'PLETH') {
+      ctx.fillStyle = sensor !== 'normal' ? spo2SensorColor : '#446688';
+      ctx.font = `bold ${sensor !== 'normal' ? '7px' : '9px'} "JetBrains Mono", monospace`;
+      ctx.fillText(d.unit, 2, top + 51);
+      if (d.extra) { ctx.fillStyle = '#2a3a4a'; ctx.font = '8px "JetBrains Mono", monospace'; ctx.fillText(d.extra, 2, top + 63); }
     } else {
       ctx.fillStyle = '#446688';
       ctx.font = '9px "JetBrains Mono", monospace';
-      ctx.fillText(units[i], 2, top + 51);
+      ctx.fillText(d.unit, 2, top + 51);
     }
   }
 
   ctx.strokeStyle = SEP_COLOR;
   ctx.lineWidth = 1;
   ctx.beginPath();
-  ctx.moveTo(LABEL_W, 0); ctx.lineTo(LABEL_W, CANVAS_H);
+  ctx.moveTo(LABEL_W, 0); ctx.lineTo(LABEL_W, canvasH);
   ctx.stroke();
 }
 
@@ -425,6 +450,17 @@ function drawLabels(
 interface Props { width?: number; }
 
 const WaveformMonitor: React.FC<Props> = ({ width: widthProp }) => {
+  // ── Dynamic channel visibility ────────────────────────────────────────────
+  const procedures   = usePatientStore(s => s.procedures);
+  const caseCategory = usePathologyStore(s => s.caseCategory);
+
+  const visibleChs = useMemo(
+    () => buildVisibleChannels(procedures, caseCategory),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [procedures.arterialLine, procedures.picMonitor, caseCategory]
+  );
+  const numCh = visibleChs.length;
+
   const wrapperRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const audioCriticalRef = useRef<HTMLAudioElement>(null);
@@ -434,15 +470,23 @@ const WaveformMonitor: React.FC<Props> = ({ width: widthProp }) => {
   const stRef = useRef({
     writeX: 0,
     lastTime: 0,
-    phases: [0, 0, 0, 0, 0, 0] as number[],
+    phases: new Array(numCh).fill(0) as number[],
     alarmLevel: 'none' as 'none' | 'warning' | 'critical',
-    prevY: new Array(NUM_CH).fill(null) as (number | null)[],
+    prevY: new Array(numCh).fill(null) as (number | null)[],
     labelTimer: 0,
     canvasW: widthProp ?? 800,
     gridCanvas: null as HTMLCanvasElement | null,
+    visibleChs,  // stored for drawLabels access
   });
 
-  const gridCanvas = useMemo(() => buildGrid(stRef.current.canvasW), [stRef.current.canvasW]);
+  // Sync visibleChs into stRef on each render
+  stRef.current.visibleChs = visibleChs;
+
+  const gridCanvas = useMemo(
+    () => buildGrid(stRef.current.canvasW, numCh),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [stRef.current.canvasW, numCh]
+  );
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -453,12 +497,15 @@ const WaveformMonitor: React.FC<Props> = ({ width: widthProp }) => {
 
     const initCanvas = (W: number): void => {
       if (W <= LABEL_W + 20) return;
+      const nch = stRef.current.visibleChs.length;
+      const canvasH = nch * CH_H;
       stRef.current.canvasW = W;
-      stRef.current.writeX = 0;
-      stRef.current.prevY = new Array(NUM_CH).fill(null);
-      stRef.current.gridCanvas = gridCanvas;
-      canvas.width = W;
-      canvas.height = CANVAS_H;
+      stRef.current.writeX  = 0;
+      stRef.current.prevY   = new Array(nch).fill(null);
+      stRef.current.phases  = new Array(nch).fill(0);
+      stRef.current.gridCanvas = buildGrid(W, nch);
+      canvas.width  = W;
+      canvas.height = canvasH;
       ctx.drawImage(stRef.current.gridCanvas, 0, 0);
       drawLabels(ctx, W, usePatientStore.getState().vitals, audioCriticalRef, audioWarningRef, stRef);
     };
@@ -484,31 +531,35 @@ const WaveformMonitor: React.FC<Props> = ({ width: widthProp }) => {
         if (drawW < 1) { rafRef.current = requestAnimationFrame(loop); return; }
 
         const { vitals } = usePatientStore.getState();
-        const hrHz = Math.max(0.2, (isFinite(vitals.heartRate) ? vitals.heartRate : 75) / 60);
-        const rrHz = Math.max(0.1, (isFinite(vitals.respiratoryRate) ? vitals.respiratoryRate : 14) / 60);
-        const freqs = [hrHz, hrHz, hrHz, rrHz, rrHz, hrHz];
+        const vChs  = st.visibleChs;
+        const nch   = vChs.length;
+        const canvasH = nch * CH_H;
+        const hrHz  = Math.max(0.2, (isFinite(vitals.heartRate) ? vitals.heartRate : 75) / 60);
+        const rrHz  = Math.max(0.1, (isFinite(vitals.respiratoryRate) ? vitals.respiratoryRate : 14) / 60);
+        // Frequency per channel by ID
+        const freqs = vChs.map(ch => ch.id === 'RESP' || ch.id === 'EtCO2' ? rrHz : hrHz);
         const pxStep = Math.max(1, Math.round(SCAN_PX_S * dt));
 
         for (let px = 0; px < pxStep; px++) {
-          const xIdx = Math.floor(st.writeX + px) % drawW;
+          const xIdx   = Math.floor(st.writeX + px) % drawW;
           const canvasX = LABEL_W + xIdx;
 
           if (xIdx === 0) {
-            st.prevY = new Array(NUM_CH).fill(null);
+            st.prevY = new Array(nch).fill(null);
           }
 
           const eraseX = LABEL_W + (xIdx + ERASE_W) % drawW;
-          const slice = Math.min(ERASE_W, W - eraseX);
+          const slice  = Math.min(ERASE_W, W - eraseX);
           if (slice > 0) {
-            ctx.drawImage(st.gridCanvas, eraseX, 0, slice, CANVAS_H, eraseX, 0, slice, CANVAS_H);
+            ctx.drawImage(st.gridCanvas, eraseX, 0, slice, canvasH, eraseX, 0, slice, canvasH);
           }
 
-          for (let ch = 0; ch < NUM_CH; ch++) {
-            st.phases[ch] = (st.phases[ch] + freqs[ch] / SCAN_PX_S) % 1;
-            let amp = getAmp(ch, st.phases[ch], vitals);
+          for (let ch = 0; ch < nch; ch++) {
+            st.phases[ch] = ((st.phases[ch] ?? 0) + freqs[ch] / SCAN_PX_S) % 1;
+            let amp = getAmpById(vChs[ch].id, st.phases[ch], vitals);
             if (!isFinite(amp)) amp = 0.5;
             const curY = ampToY(ch, amp);
-            ctx.fillStyle = CH[ch].color;
+            ctx.fillStyle = vChs[ch].color;
 
             // FIX: Condición robusta para evitar el efecto telaraña al hacer wrap-around
             if (st.prevY[ch] !== null && canvasX > LABEL_W + pxStep) {
@@ -539,11 +590,32 @@ const WaveformMonitor: React.FC<Props> = ({ width: widthProp }) => {
     return () => { ro.disconnect(); cancelAnimationFrame(rafRef.current); };
   }, [widthProp, gridCanvas]);
 
+  // Re-init canvas when number of visible channels changes
+  useEffect(() => {
+    const canvas  = canvasRef.current;
+    const wrapper = wrapperRef.current;
+    if (!canvas || !wrapper) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    const W = stRef.current.canvasW || Math.max(400, wrapper.clientWidth || 800);
+    const nch     = visibleChs.length;
+    const canvasH = nch * CH_H;
+    stRef.current.writeX  = 0;
+    stRef.current.prevY   = new Array(nch).fill(null);
+    stRef.current.phases  = new Array(nch).fill(0);
+    stRef.current.gridCanvas = buildGrid(W, nch);
+    canvas.width  = W;
+    canvas.height = canvasH;
+    ctx.drawImage(stRef.current.gridCanvas, 0, 0);
+    drawLabels(ctx, W, usePatientStore.getState().vitals, audioCriticalRef, audioWarningRef, stRef);
+  }, [numCh]); // eslint-disable-line react-hooks/exhaustive-deps
+
   return (
     <div ref={wrapperRef} className="w-full leading-[0] relative">
       <canvas
         ref={canvasRef}
-        className="block bg-[#060e1e] rounded w-full h-[480px] pointer-events-none"
+        className="block bg-[#060e1e] rounded w-full pointer-events-none"
+        style={{ height: `${numCh * CH_H}px` }}
       />
       <audio ref={audioCriticalRef} src="/sounds/alarm-critical.mp3" loop preload="auto" />
       <audio ref={audioWarningRef} src="/sounds/alarm-warning.mp3" loop preload="auto" />
