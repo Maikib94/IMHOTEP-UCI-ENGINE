@@ -228,6 +228,7 @@ export const useScenarioStore = create<ScenarioStoreState>((set, get) => ({
       import('../core/PharmacologyEngine'),
       import('./usePharmacologyStore'),
       import('../core/GlycemicEngine'),
+      import('../core/AcidBaseEngine'),
       import('../scenarios/PatientFactory'),
     ]).then(([
       { usePatientStore },
@@ -236,6 +237,7 @@ export const useScenarioStore = create<ScenarioStoreState>((set, get) => ({
       { PharmacologyEngine, DRUG_MAX_DOSES },
       { usePharmacologyStore, DRUG_CATALOG },
       { GlycemicEngine },
+      { AcidBaseEngine },
       { generatePatient },
     ]) => {
       const patient   = usePatientStore.getState();
@@ -262,6 +264,7 @@ export const useScenarioStore = create<ScenarioStoreState>((set, get) => ({
       usePharmacologyStore.getState().resetAll();
       PharmacologyEngine.getInstance().reset();
       GlycemicEngine.getInstance().reset();
+      AcidBaseEngine.getInstance().reset();
       // Reset cross-cutting engines
       import('../core/ImagingEngine').then(({ ImagingEngine }) => ImagingEngine.getInstance().reset());
       import('../store/useECMOStore').then(({ useECMOStore }) => useECMOStore.getState().resetECMO());

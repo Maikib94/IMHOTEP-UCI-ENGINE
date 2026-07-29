@@ -674,29 +674,14 @@ export class RespiratoryEngine {
     const etco2Target = Math.max(15, v.paCO2 * (1 - vdvt) - etDropoff);
     const newEtCO2 = v.etco2 + (etco2Target - v.etco2) * (dt / 4);
 
-    // pH â€” Henderson-Hasselbalch:
-    //   pH = pKa + log10( [HCO3] / (0.0307 Ã— PaCO2) )
-    //   pKa = 6.10 (H2CO3/HCO3- a 37Â°C)
-    //   [HCO3] estimado por compensaciÃ³n renal lenta (Ï„ = 2h):
-    //     Base target = 24 âˆ’ (PaCO2 âˆ’ 40) Ã— 0.15  (Winters, alcalosis resp.)
-    //     Acidosis: HCO3 aumenta 1 mEq/L por cada 10 mmHg de PaCO2 sobre 40
-    //   Suavizado HCO3 con Ï„ = 7200 s (renal)
-    const co2Dissolved = 0.0307 * Math.max(1, newPaCO2);
-    const hco3Target = v.paCO2 > 40
-      ? Math.min(45, 24 + (newPaCO2 - 40) * 0.1)   // acidosis: HCO3 sube lentamente
-      : Math.max(12, 24 - (40 - newPaCO2) * 0.15); // alcalosis: HCO3 baja lentamente
-    const tauHCO3 = 7200;
-    const newHCO3 = v.hco3 + (hco3Target - v.hco3) * (dt / tauHCO3);
-    const newPH = 6.10 + Math.log10(Math.max(0.001, newHCO3) / Math.max(0.01, co2Dissolved));
-    const newBE = newHCO3 - 24 - 0.93 * (newPaCO2 - 40);  // Stewart simplificado
+    // pH / HCO3 / BE son propiedad exclusiva de AcidBaseEngine.
+    // Este motor solo publica paCO2; la titulacion acido-base se
+    // resuelve aguas abajo en la cadena del CronosEngine.
 
     pat.updateVitals({
       paO2:      Math.round(Math.max(35,   Math.min(500, newPaO2))),
       paCO2:     Math.round(Math.max(15,   Math.min(120, newPaCO2))),
       spo2:      Math.round(Math.max(60,   Math.min(100, newSpO2))),
-      pH:        Math.round(Math.max(6.80, Math.min(7.70, newPH)) * 1000) / 1000,
-      hco3:      Math.round(Math.max(10,   Math.min(50,  newHCO3)) * 10) / 10,
-      baseExcess:Math.round(Math.max(-20,  Math.min(20,  newBE))   * 10) / 10,
       etco2:     Math.round(Math.max(5,    Math.min(80,  newEtCO2))* 10) / 10,
     });
   }
