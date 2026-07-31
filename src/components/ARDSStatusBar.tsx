@@ -48,7 +48,12 @@ export const ARDSStatusBar: React.FC<ARDSStatusBarProps> = ({ overrideSeverity }
 
   // Seleccionar qué ratio mostrar: P/F si disponible, S/F si no hay PaO₂
   const showSF    = pfStore === 0 || pfStore > 900;
-  const mainRatio = showSF ? sfStore : pfStore;
+  // pfStore/sfRatio ahora llegan en punto flotante completo (C1.5) — el
+  // redondeo a entero es de presentacion. No son keyof Vitals (viven en
+  // usePathologyStore, no en usePatientStore.vitals), asi que no usan
+  // formatVitalByKey; se redondean inline como ya hace este componente
+  // con fio2Pct/pfInstant.
+  const mainRatio = Math.round(showSF ? sfStore : pfStore);
   const ratioLabel = showSF ? 'S/F' : 'P/F';
 
   // Barra proporcional (400 = normal SpO₂/FiO₂ base; ajustado para 0–400)

@@ -30,13 +30,18 @@
 
 import { describe, it, expect } from 'vitest';
 import { usePatientStore } from '../../src/store/usePatientStore';
+import { usePathologyStore } from '../../src/store/usePathologyStore';
 import { usePharmacologyStore } from '../../src/store/usePharmacologyStore';
 import { useCRRTStore } from '../../src/store/useCRRTStore';
+import { useMicrobiologyStore } from '../../src/store/useMicrobiologyStore';
+import { useTimeStore } from '../../src/store/useTimeStore';
 import { RespiratoryEngine } from '../../src/core/RespiratoryEngine';
 import { CardiovascularEngine } from '../../src/core/CardiovascularEngine';
 import { RenalEngine } from '../../src/core/RenalEngine';
 import { CrosstalkEngine } from '../../src/core/CrosstalkEngine';
 import { AcidBaseEngine } from '../../src/core/AcidBaseEngine';
+import { PharmacologyEngine } from '../../src/core/PharmacologyEngine';
+import { MicrobiologyEngine } from '../../src/core/MicrobiologyEngine';
 
 // dt real de produccion a velocidad x1 (CronosEngine.DT_BASE = 1/TICKS_PER_REAL_SECOND)
 const DT_FINE = 1 / 240;
@@ -226,8 +231,8 @@ describe('C1.5 — diagnostico de cuantizacion de integradores (no falla)', () =
     // No es un integrador exponencial hacia un target — es un decremento a
     // tasa fija mientras furoActive && evlwi>7. delta_esperado es lineal.
     {
-      const effects = { ...usePharmacologyStore.getState().systemicEffects, diureticEffect: 3 };
-      usePharmacologyStore.getState().updateSystemicEffects(effects);
+      const baselineEffects = usePharmacologyStore.getState().systemicEffects;
+      usePharmacologyStore.getState().updateSystemicEffects({ ...baselineEffects, diureticEffect: 3 });
       const initial = 10.0;
       pat.updateVitals({ evlwi: initial });
       const RATE = 0.0008;
@@ -236,8 +241,10 @@ describe('C1.5 — diagnostico de cuantizacion de integradores (no falla)', () =
       const obs = usePatientStore.getState().vitals.evlwi - initial;
       const deltaEsperado = -RATE * (N * DT_FINE);
       pushRow('evlwi', 'lineal', deltaEsperado, deltaEsperado, obs);
-      // Restaurar para no contaminar campos siguientes.
-      usePharmacologyStore.getState().updateSystemicEffects(usePharmacologyStore.getState().systemicEffects);
+      // Restaurar diureticEffect=0 para no contaminar los campos siguientes
+      // (RenalEngine lo lee para uoTarget; el bug real era que esta linea
+      // antes re-escribia el mismo objeto ya mutado, no lo restauraba).
+      usePharmacologyStore.getState().updateSystemicEffects(baselineEffects);
     }
 
     // ═══ urineOutput (RenalEngine, tau=30) ══════════════════════════════════
@@ -320,10 +327,114 @@ describe('C1.5 — diagnostico de cuantizacion de integradores (no falla)', () =
       pushRow('hco3 (control, C1)', 'exp', gap, gap * frac, obs);
     }
 
+    // ═══ magnesiumMgdL (PharmacologyEngine, decaimiento natural 0.05 mg/dL/h) ═
+    // Rama "sin infusion activa" (mgCpRatio<=0.01, cpRatio es privado del
+    // motor y no se puede fijar desde afuera) — decaimiento natural puro,
+    // no depende de Cp. Modelo lineal (no exponencial): no hay termino
+    // proporcional a (target-actual).
+    {
+      usePathologyStore.getState().resetAllPathologies();
+      useCRRTStore.getState().setActive(false);
+      usePharmacologyStore.getState().resetAll();
+      const initial = 5.0;
+      pat.updateVitals({ magnesiumMgdL: initial });
+      const RATE = 0.05; // mg/dL/h (crrtActive=false)
+      const N = 432000; // 1800 s sim
+      for (let i = 0; i < N; i++) PharmacologyEngine.getInstance().update(DT_FINE);
+      const obs = usePatientStore.getState().vitals.magnesiumMgdL - initial;
+      const deltaEsperado = -RATE * (N * DT_FINE) / 3600;
+      pushRow('magnesiumMgdL', 'lineal', deltaEsperado, deltaEsperado, obs);
+    }
+
+    // ═══ kPlasma (RenalEngine, recuperacion natural K+ 4c) ══════════════════
+    // kDrift = (4.0-kNow)*8e-6*dt → exponencial, tau=1/8e-6=125000s.
+    {
+      usePharmacologyStore.getState().resetAll(); // diureticEffect=0,beta2=0 → activa rama 4c
+      const MAP_FIXED = 90;
+      const initial = 3.0;
+      pat.updateVitals({
+        kPlasma: initial, meanArterialPressure: MAP_FIXED,
+        urineOutput: 1.0, creatinine: 1.0,
+      });
+      const target = 4.0;
+      const gap = target - initial;
+      const K_K = 8e-6;
+      const tau = 1 / K_K;
+      const N = 432000; // 1800 s sim
+      for (let i = 0; i < N; i++) {
+        pat.updateVitals({ meanArterialPressure: MAP_FIXED }); // pin (consistencia con RenalEngine)
+        RenalEngine.getInstance().update(DT_FINE);
+      }
+      const obs = usePatientStore.getState().vitals.kPlasma - initial;
+      const frac = 1 - Math.exp(-(N * DT_FINE) / tau);
+      pushRow('kPlasma', 'exp', gap, gap * frac, obs);
+    }
+
+    // ═══ creatinine (MicrobiologyEngine, nefrotoxicidad ATB) ════════════════
+    // amphotericin_b: nephroStressorRate=0.010 Cr/h, rama "tasa base" (no es
+    // vancomicina/aminoglucosido/colistina, sin logica de MAP/trough extra).
+    // update() esta gateado por sepsis.isActive — se activa sepsis solo para
+    // levantar ese gate, no para modelar la nefrotoxicidad en si.
+    {
+      usePathologyStore.getState().activatePathology('sepsis', null, 0.75);
+      useMicrobiologyStore.getState().startAntibiotic('amphotericin_b', useTimeStore.getState().ticks, false);
+      const initial = 1.0;
+      pat.updateVitals({ creatinine: initial });
+      const RATE = 0.010; // Cr/h
+      const N = 432000; // 1800 s sim
+      for (let i = 0; i < N; i++) MicrobiologyEngine.getInstance().update(DT_FINE);
+      const obs = usePatientStore.getState().vitals.creatinine - initial;
+      const deltaEsperado = RATE * (N * DT_FINE) / 3600;
+      pushRow('creatinine (ATB nefrotox)', 'lineal', deltaEsperado, deltaEsperado, obs);
+      // Limpieza — no contaminar el bloque siguiente (heartRate).
+      useMicrobiologyStore.getState().resetMicrobiology();
+      usePathologyStore.getState().resetAllPathologies();
+    }
+
+    // ═══ heartRate (CardiovascularEngine, banda muerta HR_HOMEO) ════════════
+    // HR solo se actualiza ~1x/sim-segundo (noiseTimer >= NOISE_INT=1.0), con
+    // drift=(target-actual)*0.05 + ruido uniforme[-1,1]. tau efectivo =
+    // NOISE_INT/-ln(1-0.05) ≈ 19.5s. El ruido (irreducible, no depende de dt)
+    // impone un piso de banda muerta — no se espera ratio~1 tan limpio como
+    // los campos deterministicos. targetRef se asienta empiricamente dejando
+    // el sistema converger con gap≈0 antes de forzar el gap de prueba.
+    // El ruido (this.pendingNoise = random()*2-1) es irreducible y no depende
+    // de dt: la varianza estacionaria teorica del proceso AR(1) resultante es
+    // Var[U(-1,1)]/(1-0.95^2) ≈ 3.42 → std ≈ 1.85 bpm. Una sola corrida puede
+    // caer a 2+ std del centro por puro azar — se promedian 5 corridas
+    // independientes para no reportar una muestra ruidosa como si fuera la
+    // banda muerta real.
+    {
+      const TRIALS = 5;
+      const deadBands: number[] = [];
+      let lastGap = 0, lastObs = 0, lastFrac = 0;
+      for (let trial = 0; trial < TRIALS; trial++) {
+        usePathologyStore.getState().resetAllPathologies();
+        usePharmacologyStore.getState().resetAll();
+        pat.updateVitals({ heartRate: 75, cardiacOutput: 5.0, meanArterialPressure: 90 });
+        const N_SETTLE = 240 * 120; // 120 s para asentar target con gap≈0
+        for (let i = 0; i < N_SETTLE; i++) CardiovascularEngine.getInstance().updateHemodynamics(DT_FINE);
+        const targetRef = usePatientStore.getState().vitals.heartRate;
+
+        const gap = 8;
+        pat.updateVitals({ heartRate: targetRef - gap });
+        const N = 240 * 300; // 300 s (V3: gap inicial 8 bpm, ventana 300s)
+        const tau = 1 / -Math.log(1 - 0.05);
+        for (let i = 0; i < N; i++) CardiovascularEngine.getInstance().updateHemodynamics(DT_FINE);
+        const finalHR = usePatientStore.getState().vitals.heartRate;
+        const frac = 1 - Math.exp(-(N * DT_FINE) / tau);
+        deadBands.push(Math.abs(finalHR - targetRef));
+        lastGap = gap; lastObs = finalHR - (targetRef - gap); lastFrac = frac;
+      }
+      const meanDeadBand = deadBands.reduce((a, b) => a + b, 0) / TRIALS;
+      pushRow('heartRate', 'exp', lastGap, lastGap * lastFrac, lastObs);
+      console.log(`DEAD BAND heartRate (${TRIALS} corridas): [${deadBands.map(d => d.toFixed(2)).join(', ')}] bpm — media=${meanDeadBand.toFixed(3)} bpm (piso teorico de ruido ≈1.85 bpm std; "<1bpm" de V3 es optimista frente a ese piso)`);
+    }
+
     // ═══ Reporte ═════════════════════════════════════════════════════════
     console.table(rows);
 
     // Diagnostico puro — no debe fallar nunca.
-    expect(rows.length).toBe(10);
-  }, 300_000); // ~1.7M ticks totales — corrida larga a proposito (diagnostico)
+    expect(rows.length).toBe(14);
+  }, 600_000); // ~4M ticks totales — corrida larga a proposito (diagnostico)
 });

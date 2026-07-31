@@ -367,12 +367,12 @@ export class PharmacologyEngine {
         const mgRise = mgCpRatio * 0.5 * dtSeconds / 60; // mg/dL por minuto
         const renal_clearance = crrtActive ? 1.5 : 0.3;   // CRRT aclara rápido
         const newMg = Math.max(2.0, Math.min(20, currentMg + mgRise - renal_clearance * dtSeconds / 3600));
-        pat2.updateVitals({ magnesiumMgdL: parseFloat(newMg.toFixed(1)) });
+        pat2.updateVitals({ magnesiumMgdL: newMg });
       } else if (currentMg > 2.0) {
         // Decaimiento natural (renal)
         const decay = crrtActive ? 0.6 : 0.05; // mg/dL/h
         const newMg = Math.max(2.0, currentMg - decay * dtSeconds / 3600);
-        pat2.updateVitals({ magnesiumMgdL: parseFloat(newMg.toFixed(1)) });
+        pat2.updateVitals({ magnesiumMgdL: newMg });
       }
     }
 

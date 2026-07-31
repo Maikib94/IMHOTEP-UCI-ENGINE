@@ -359,11 +359,11 @@ export class CardiovascularEngine {
     sv = Math.min(130, sv);
 
     // ─── 5. PRESIÓN VENOSA CENTRAL (CVP) ───────────────────────────────────
-    const newCVP = Math.max(0, Math.round(
+    const newCVP = Math.max(0,
       CVP_BASE
       + (vol - BV_BASE) / CVP_FACTOR
       + coupling.cvpTransmission
-    ));
+    );
 
     // ─── 6. FRECUENCIA CARDÍACA (HR) ───────────────────────────────────────
     const pao2 = v.paO2 || 95;
@@ -402,9 +402,7 @@ export class CardiovascularEngine {
       this.noiseTimer = 0;
       this.pendingNoise = Math.random() * 2 - 1;
       const drift = (targetHRAdjusted - v.heartRate) * HR_HOMEO;
-      newHR = Math.round(
-        Math.max(HR_MIN, Math.min(HR_MAX, v.heartRate + this.pendingNoise + drift))
-      );
+      newHR = Math.max(HR_MIN, Math.min(HR_MAX, v.heartRate + this.pendingNoise + drift));
     }
 
     // ─── 7. RESISTENCIA VASCULAR, GASTO CARDÍACO Y PAM ─────────────────────
@@ -436,8 +434,8 @@ export class CardiovascularEngine {
     const DynSvrVaso = pd.vasoplegiaRev * 600;
     const dynSvr = v.baseSvr * svrMultiplier * corPulmonaleSvrFactor + DynSvrAlpha + DynSvrVaso;
 
-    const co = Number(((newHR * sv) / 1000).toFixed(1));
-    const baseMap = Math.round((co * dynSvr) / 80 + newCVP);
+    const co = (newHR * sv) / 1000;
+    const baseMap = (co * dynSvr) / 80 + newCVP;
 
     // ─── 8. RECUPERACIÓN LOGÍSTICA ANTIMICROBIANA ──────────────────────────
     const { treatmentEfficacy } = useMicrobiologyStore.getState();
@@ -458,16 +456,16 @@ export class CardiovascularEngine {
     const mapRecoveryBonus = Math.round(this.treatmentRecovery * RECOVERY_MAP_BONUS_MAX);
 
     // acid.map is negative for low pH; recovers automatically when pH normalizes.
-    const map = Math.max(0, Math.round(
+    const map = Math.max(0,
       baseMap
       + pd.beta1 * 2
       + pd.mapDirectDelta
       + mapRecoveryBonus
       + acid.map
-    ));
+    );
 
-    const dbp = Math.round(map - 40 / 3);
-    const sbp = Math.round(dbp + 40);
+    const dbp = map - 40 / 3;
+    const sbp = dbp + 40;
 
     // ─── 9. ONDA DE PLETISMOGRAFÍA (Pleth Amplitude) ───────────────────────
     const pmeanExcessForPleth = Math.max(0, pmean - PAW_PLETH_THRESHOLD);
@@ -488,7 +486,7 @@ export class CardiovascularEngine {
     const profileCV    = store.profile;
     const bsaCV        = Math.max(1.0, profileCV?.bsaMosteller ?? 1.7);
     const volFracCV    = Math.max(0.4, Math.min(1.5, vol / 5000));
-    const gediContinua = Math.round(740 * volFracCV / bsaCV * 1.7);
+    const gediContinua = 740 * volFracCV / bsaCV * 1.7;
 
     // ─── 10b. EVLWI continua — descongestión pulmonar por furosemida ──────────
     // Schmidt GA et al. Crit Care 2018;22:113. DOI: 10.1186/s13054-018-2019-8
@@ -502,16 +500,16 @@ export class CardiovascularEngine {
     // ─── 11. ACTUALIZACIÓN DEL STORE ───────────────────────────────────────
     upd({
       cardiacOutput: co,
-      svr: Math.round(dynSvr),
+      svr: dynSvr,
       cvp: newCVP,
-      strokeVolume: Math.round(sv),
+      strokeVolume: sv,
       meanArterialPressure: map,
       systolicBP: sbp,
       diastolicBP: dbp,
       heartRate: newHR,
-      plethAmplitude: Math.round(pleth * 100) / 100,
+      plethAmplitude: pleth,
       gedi: gediContinua,
-      evlwi: Math.round(newEvlwi * 100) / 100,
+      evlwi: newEvlwi,
       ...this.computeTemperature(v.temperature, vol, pd.thermoDepression, dt),
     });
   }
@@ -572,6 +570,6 @@ export class CardiovascularEngine {
     const targetT = 37.0 + hemorrHypothermia + drugHypothermia;
     const tau = 300; // s (respuesta lenta térmica)
     const newT = currentTemp + (targetT - currentTemp) * (dt / tau);
-    return { temperature: Math.round(newT * 10) / 10 };
+    return { temperature: newT };
   }
 }

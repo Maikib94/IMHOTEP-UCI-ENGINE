@@ -334,7 +334,7 @@ export function PatientInfoModal() {
                       <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                         <span style={{ color: C.dim }}>SDRA</span>
                         <span style={{ color: ards.diagnosis !== 'none' ? '#ef4444' : C.dim, fontWeight: 700 }}>
-                          {ards.diagnosis !== 'none' ? `${ards.diagnosis.toUpperCase()} (P/F ${ards.pfRatio})` : 'Sin diagnóstico aún'}
+                          {ards.diagnosis !== 'none' ? `${ards.diagnosis.toUpperCase()} (P/F ${Math.round(ards.pfRatio)})` : 'Sin diagnóstico aún'}
                         </span>
                       </div>
                     )}
@@ -347,7 +347,7 @@ export function PatientInfoModal() {
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                       <span style={{ color: C.dim }}>Vitales actuales (HR/PAM/SpO₂)</span>
                       <span style={{ color: C.mid, fontFamily: 'monospace' }}>
-                        {Math.round(vitals.heartRate)} lpm / {Math.round(vitals.meanArterialPressure)} mmHg / {vitals.spo2}%
+                        {Math.round(vitals.heartRate)} lpm / {Math.round(vitals.meanArterialPressure)} mmHg / {Math.round(vitals.spo2)}%
                       </span>
                     </div>
                   </div>

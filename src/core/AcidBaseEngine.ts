@@ -49,21 +49,9 @@ const BE_CONST_COEFF     = 7.7;
 const BE_PH_REF          = 7.4;
 const DD_DENOM_MIN       = 0.5;
 
-// hco3 publicado al store se redondea a 1 decimal (contrato externo, sin
-// cambios). El incremento renal por tick (~0.00008 mEq/L) es varios ordenes
-// de magnitud menor a esa granularidad: si cada tick se relee v.hco3 ya
-// redondeado como base del siguiente calculo, el drift renal se pierde en
-// el redondeo para siempre y la compensacion cronica nunca progresa. Por
-// eso se mantiene un acumulador interno de precision completa y solo se
-// resincroniza con el store cuando alguien externo cambia hco3 de verdad
-// (una intervencion clinica, un fixture de test) mas alla del margen de
-// redondeo propio (±0.05).
-const HCO3_EXTERNAL_CHANGE_THR = 0.06;
-
 export class AcidBaseEngine {
   private static instance: AcidBaseEngine | null = null;
   private chronicityFrac: number = 0;
-  private hco3Precise: number | null = null;
   private constructor() {}
 
   public static getInstance(): AcidBaseEngine {
@@ -74,7 +62,6 @@ export class AcidBaseEngine {
 
   public reset(): void {
     this.chronicityFrac = 0;
-    this.hco3Precise = null;
   }
 
   public update(dt: number): void {
@@ -147,13 +134,6 @@ export class AcidBaseEngine {
     const lacDelta      = newLactate - v.lactate;
     const hco3FromLac   = -(lacDelta * BICARB_BUFFER);
 
-    // Resincronizar el acumulador de precision completa si el store se
-    // aparto de el mas alla del margen propio de redondeo (cambio externo).
-    const hco3Base = (this.hco3Precise === null ||
-      Math.abs(v.hco3 - this.hco3Precise) > HCO3_EXTERNAL_CHANGE_THR)
-      ? v.hco3
-      : this.hco3Precise;
-
     // Maduracion de la compensacion renal (agudo -> cronico)
     const paCO2Deviation = Math.abs(v.paCO2 - PACO2_NORMAL);
     if (paCO2Deviation > 5) {
@@ -174,12 +154,11 @@ export class AcidBaseEngine {
       : Math.max(RENAL_HCO3_MIN, HCO3_NORMAL - alkCoeff  * Math.abs(paCO2Delta));
 
     const kRenal      = v.urineOutput < URINE_OLIGO_THR ? K_RENAL_IMPAIRED : K_RENAL;
-    const hco3FromRen = (renalTgt - hco3Base) * kRenal * dt;
+    const hco3FromRen = (renalTgt - v.hco3) * kRenal * dt;
 
     const newHCO3 = Math.max(HCO3_MIN, Math.min(HCO3_MAX,
-      hco3Base + hco3FromLac + hco3FromRen
+      v.hco3 + hco3FromLac + hco3FromRen
     ));
-    this.hco3Precise = newHCO3;
 
     const rawPH  = HH_PKA + Math.log10(Math.max(0.1, newHCO3) / (CO2_ALPHA * Math.max(1, v.paCO2)));
     const newPH  = Math.max(PH_MIN, Math.min(PH_MAX, rawPH));
@@ -189,21 +168,19 @@ export class AcidBaseEngine {
     const hb     = HB_NORMAL * (vol / BV_BASE);
     // BE = (1 - 0.014*Hb) * ([HCO3] - 24 + (1.43*Hb + 7.7)*(pH - 7.4))
     // Ref: Siggaard-Andersen O, Scand J Clin Lab Invest 1977;37:15
-    const newBE  = parseFloat((
+    const newBE  =
       (1 - 0.014 * hb) *
-      ((newHCO3 - 24.0) + (BE_HB_COEFF * hb + BE_CONST_COEFF) * (newPH - BE_PH_REF))
-    ).toFixed(1));
+      ((newHCO3 - 24.0) + (BE_HB_COEFF * hb + BE_CONST_COEFF) * (newPH - BE_PH_REF));
 
     const deltaAG   = newAG - AG_NORMAL;
     const deltaHCO3 = HCO3_NORMAL - newHCO3;
-    const newDD     = deltaHCO3 > DD_DENOM_MIN
-      ? parseFloat((deltaAG / deltaHCO3).toFixed(2)) : 0;
+    const newDD     = deltaHCO3 > DD_DENOM_MIN ? deltaAG / deltaHCO3 : 0;
 
     upd({
-      pH:         parseFloat(newPH.toFixed(3)),
-      hco3:       parseFloat(newHCO3.toFixed(1)),
-      lactate:    parseFloat(newLactate.toFixed(1)),
-      anionGap:   Math.round(newAG),
+      pH:         newPH,
+      hco3:       newHCO3,
+      lactate:    newLactate,
+      anionGap:   newAG,
       baseExcess: newBE,
       deltaDelta: newDD,
     });

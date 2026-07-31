@@ -169,14 +169,14 @@ export class RenalEngine {
         kNow = clamp(2.0, 5.5, kNow + kDrift);
       }
     }
-    upd({ kPlasma: parseFloat(kNow.toFixed(3)) });
+    upd({ kPlasma: kNow });
 
     // ─── 5. Suavizado tubular τ = 30 s sim (Bellomo Lancet 2012) ─────────────
     const factor = Math.min(1, dt / TAU_UO_S);
     const newUO  = clamp(UO_MIN, UO_MAX,
       (v.urineOutput ?? UO_NORMAL) + (uoTarget - (v.urineOutput ?? UO_NORMAL)) * factor
     );
-    upd({ urineOutput: parseFloat(newUO.toFixed(3)) });
+    upd({ urineOutput: newUO });
 
     // ─── 6. Pérdida de volumen circulante por diuresis ────────────────────────
     // Diuresis efectiva drena del compartimento intravascular.

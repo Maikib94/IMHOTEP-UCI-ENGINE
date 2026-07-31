@@ -246,7 +246,7 @@ function ARMStatusBar({ onOpenConsole }: { onOpenConsole: () => void }) {
         <span className="text-slate-500">{mode}</span>
         <span className="text-slate-400">FiO₂ {Math.round(fio2 * 100)}%</span>
         <span className="text-slate-400">PEEP {peep}</span>
-        <span className="font-bold" style={{ color: spo2Color }}>SpO₂ {spo2}%</span>
+        <span className="font-bold" style={{ color: spo2Color }}>SpO₂ {Math.round(spo2)}%</span>
       </div>
     </div>
   );

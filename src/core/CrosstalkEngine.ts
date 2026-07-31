@@ -89,9 +89,9 @@ export class CrosstalkEngine {
     const newPaO2      = (v.paO2 ?? 80) + (paO2Target - (v.paO2 ?? 80)) * (dt / tau_co2);
 
     pat.updateVitals({
-      paCO2: Math.round(newPaCO2 * 10) / 10,
-      spo2:  Math.round(newSaO2 * 10) / 10,
-      paO2:  Math.round(newPaO2 * 10) / 10,
+      paCO2: newPaCO2,
+      spo2:  newSaO2,
+      paO2:  newPaO2,
     });
 
     // ΔP monitor — alerta si > 14 cmH₂O durante ECMO
@@ -243,7 +243,7 @@ export class CrosstalkEngine {
     const netRemoval_mLs = 100 / 3600;
     const newBV = Math.max(2000, pat.bloodVolume - netRemoval_mLs * dt);
 
-    pat.updateVitals({ creatinine: parseFloat(newCr.toFixed(2)) });
+    pat.updateVitals({ creatinine: newCr });
     pat.setBloodVolume(newBV);
   }
 }

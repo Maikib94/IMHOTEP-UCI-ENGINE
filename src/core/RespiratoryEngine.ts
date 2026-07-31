@@ -30,7 +30,6 @@ import {
 } from '../store/usePatientStore';
 import { usePathologyStore } from '../store/usePathologyStore';
 import { usePharmacologyStore } from '../store/usePharmacologyStore';
-import { useTimeStore } from '../store/useTimeStore';
 import {
   VentilatorSM100Engine,
   deriveMechanicsFromPathology,
@@ -232,7 +231,7 @@ export class RespiratoryEngine {
       if (this.activatedManeuver === 'INSPIRATORY') {
         // Pplat medido = presiÃ³n elÃ¡stica pura (flujo=0): Vt/C + PEEP
         const crs = Math.max(10, ventilator.vt / Math.max(1, vitals.pplat - ventilator.peep));
-        const pplat = Math.round((ventilator.vt / crs + ventilator.peep) * 10) / 10;
+        const pplat = ventilator.vt / crs + ventilator.peep;
         const cstat = Math.round(ventilator.vt / Math.max(0.1, pplat - ventilator.peep) * 10) / 10;
         pat.updateVitals({ pplat });
         // Publicar Cstat al monitor SM100
@@ -367,15 +366,15 @@ export class RespiratoryEngine {
       // Ventilador controla: RR = set, volÃºmenes garantizados
       if (breath.breathId > 0) {
         pat.updateVitals({
-          pplat: Math.round(breath.pPlat * 10) / 10,
-          ppico: Math.round(breath.pPeak * 10) / 10,
-          meanAirwayPressure: Math.round(breath.pMean * 10) / 10,
-          deltaP: Math.round(breath.drivingPressure * 10) / 10,
-          mechanicalPower: Math.round(breath.mechPowerJmin * 10) / 10,
-          respiratoryRate: Math.round(60 / Math.max(0.5, breath.tCycle)),
+          pplat: breath.pPlat,
+          ppico: breath.pPeak,
+          meanAirwayPressure: breath.pMean,
+          deltaP: breath.drivingPressure,
+          mechanicalPower: breath.mechPowerJmin,
+          respiratoryRate: 60 / Math.max(0.5, breath.tCycle),
         });
       }
-      this.updateGasExchange(dt, mechanicsEff.crs, rawMV);
+      this.updateGasExchange(dt, rawMV);
     } else {
       // Sin ARM: NMB/sedaciÃ³n reducen drive respiratorio â†’ apnea posible
       const nmba = pharm.systemicEffects.nmba;
@@ -383,19 +382,17 @@ export class RespiratoryEngine {
       const driveFactor = Math.max(0, 1 - nmba * 0.92 - respDepr * 0.45);
 
       if (breath.breathId > 0) {
-        const spontRR = Math.round(
-          Math.round(60 / Math.max(0.5, breath.tCycle)) * driveFactor
-        );
+        const spontRR = (60 / Math.max(0.5, breath.tCycle)) * driveFactor;
         pat.updateVitals({
-          pplat: Math.round(breath.pPlat * 10) / 10,
-          ppico: Math.round(breath.pPeak * 10) / 10,
-          meanAirwayPressure: Math.round(breath.pMean * 10) / 10,
-          deltaP: Math.round(breath.drivingPressure * 10) / 10,
-          mechanicalPower: Math.round(breath.mechPowerJmin * 10) / 10,
+          pplat: breath.pPlat,
+          ppico: breath.pPeak,
+          meanAirwayPressure: breath.pMean,
+          deltaP: breath.drivingPressure,
+          mechanicalPower: breath.mechPowerJmin,
           respiratoryRate: spontRR,
         });
       }
-      this.updateGasExchange(dt, mechanicsEff.crs, rawMV * driveFactor);
+      this.updateGasExchange(dt, rawMV * driveFactor);
     }
 
     // â”€â”€ 6. Publicar outputs al ventilador del store (Fase 3) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -463,8 +460,8 @@ export class RespiratoryEngine {
 
     // P/F y S/F
     const fio2Safe = Math.max(0.21, effectiveFiO2);
-    const pfRatio  = Math.round(v.paO2 / fio2Safe);
-    const sfRatio  = Math.round(v.spo2 / fio2Safe);
+    const pfRatio  = v.paO2 / fio2Safe;
+    const sfRatio  = v.spo2 / fio2Safe;
 
     // DiagnÃ³stico con histÃ©resis
     type Dx = 'none' | 'mild' | 'moderate' | 'severe';
@@ -605,7 +602,7 @@ export class RespiratoryEngine {
   //     PaCOâ‚‚ = (VCOâ‚‚ Â· 0.863) / V_E_alveolar
   //     donde V_E_alv = (V_T âˆ’ V_D) Â· f / 1000   (L/min)
   //
-  private updateGasExchange(dt: number, crs: number, mvLmin: number): void {
+  private updateGasExchange(dt: number, mvLmin: number): void {
     const pat = usePatientStore.getState();
     const v = pat.vitals;
     const path = usePathologyStore.getState();
@@ -679,10 +676,10 @@ export class RespiratoryEngine {
     // resuelve aguas abajo en la cadena del CronosEngine.
 
     pat.updateVitals({
-      paO2:      Math.round(Math.max(35,   Math.min(500, newPaO2))),
-      paCO2:     Math.round(Math.max(15,   Math.min(120, newPaCO2))),
-      spo2:      Math.round(Math.max(60,   Math.min(100, newSpO2))),
-      etco2:     Math.round(Math.max(5,    Math.min(80,  newEtCO2))* 10) / 10,
+      paO2:      Math.max(35,   Math.min(500, newPaO2)),
+      paCO2:     Math.max(15,   Math.min(120, newPaCO2)),
+      spo2:      Math.max(60,   Math.min(100, newSpO2)),
+      etco2:     Math.max(5,    Math.min(80,  newEtCO2)),
     });
   }
 
