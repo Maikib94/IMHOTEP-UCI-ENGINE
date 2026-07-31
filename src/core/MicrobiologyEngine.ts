@@ -823,11 +823,14 @@ export class MicrobiologyEngine {
       if (!def || !def.nephrotoxic) continue;
 
       // Vancomicina: nefrotóxico sólo cuando trough > 20 μg/mL (ASHP 2020)
+      // nephroStressorRate esta en Cr/h (ver comentario en useMicrobiologyStore.ts);
+      // dt viene en segundos — dividir por 3600 para no aplicar la tasa horaria
+      // 3600x mas rapido de lo calibrado (C1.7 commit 1, bug de unidades).
       if (atb.antibioticId === 'vancomycin') {
         if (atb.troughLevel > VANCO_TROUGH_TOXIC) {
           // Daño proporcional al exceso de trough
           const excess = atb.troughLevel - VANCO_TROUGH_TOXIC;
-          deltaCr += def.nephroStressorRate * (1 + excess / 20) * dt;
+          deltaCr += (def.nephroStressorRate / 3600) * (1 + excess / 20) * dt;
         }
         continue;
       }
@@ -837,7 +840,7 @@ export class MicrobiologyEngine {
         // Mayor toxicidad si perfusión renal reducida (MAP < 65)
         const map = pat.vitals.meanArterialPressure;
         const renalPerfusionFactor = map < 65 ? 2.0 : 1.0;
-        deltaCr += def.nephroStressorRate * renalPerfusionFactor * dt;
+        deltaCr += (def.nephroStressorRate / 3600) * renalPerfusionFactor * dt;
         continue;
       }
 
@@ -845,19 +848,19 @@ export class MicrobiologyEngine {
       if (['colistin', 'polymyxin_b'].includes(atb.antibioticId)) {
         const map = pat.vitals.meanArterialPressure;
         const renalFactor = map < 65 ? 2.5 : 1.0;
-        deltaCr += def.nephroStressorRate * renalFactor * dt;
+        deltaCr += (def.nephroStressorRate / 3600) * renalFactor * dt;
         continue;
       }
 
       // Resto: aplicar tasa base
-      deltaCr += def.nephroStressorRate * dt;
+      deltaCr += (def.nephroStressorRate / 3600) * dt;
     }
 
     if (deltaCr > 0) {
       // Creatinina sube hasta máx clínico de 15 mg/dL (IRA anúrica terminal)
       const newCr = Math.min(15, currentCr + deltaCr);
       if (newCr !== currentCr) {
-        pat.updateVitals({ creatinine: Math.round(newCr * 100) / 100 });
+        pat.updateVitals({ creatinine: newCr });
       }
     }
   }

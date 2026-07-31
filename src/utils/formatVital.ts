@@ -1,5 +1,10 @@
 // src/utils/formatVital.ts
 //
+// NOTA (C1.5/C1.7): tambien existe src/utils/formatVitalByKey.ts — firma
+// distinta (key: keyof Vitals, value) que busca decimales por campo en una
+// tabla; este archivo usa (value, {min,max,digits,unit}) con clamp explicito.
+// No son intercambiables, no unificar sin avisar a los consumidores.
+//
 // Formateador seguro de signos vitales con clamp obligatorio.
 // Evita la concatenación rota que produce "1101pm" (FC=110 + unit "lpm" sin espacio).
 //

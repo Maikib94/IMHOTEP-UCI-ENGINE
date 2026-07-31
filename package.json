@@ -8,13 +8,14 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "test":       "vitest run",
+    "test":       "vitest run --exclude \"tests/diagnostics/**\"",
     "test:watch": "vitest",
     "test:unit":  "vitest run tests/unit",
     "test:int":   "vitest run tests/integration",
     "test:cross": "vitest run tests/crossphase",
     "test:cov":   "vitest run --coverage",
-    "test:e2e":   "playwright test"
+    "test:e2e":   "playwright test",
+    "test:diagnostics": "vitest run tests/diagnostics --no-file-parallelism"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.2.2",

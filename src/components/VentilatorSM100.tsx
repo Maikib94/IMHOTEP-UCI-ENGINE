@@ -778,13 +778,13 @@ export const VentilatorSM100: React.FC = () => {
           padding: '8px 0 0 0',
           borderTop: '1px solid rgba(255,255,255,0.06)',
         }}>
-          <ValBox label="PaO₂" value={paO2}
+          <ValBox label="PaO₂" value={paO2.toFixed(0)}
             unit="mmHg" alert={paO2 < 60} accent="#22d3ee" />
-          <ValBox label="PaCO₂" value={paCO2}
+          <ValBox label="PaCO₂" value={paCO2.toFixed(0)}
             unit="mmHg" alert={paCO2 > 50} accent="#f59e0b" />
           <ValBox label="pH" value={pH.toFixed(3)}
             unit="" alert={pH < 7.25 || pH > 7.55} accent="#a3e635" />
-          <ValBox label="SpO₂" value={spo2}
+          <ValBox label="SpO₂" value={spo2.toFixed(0)}
             unit="%" alert={spo2 < 90} accent="#34d399" />
           {/* Cstat medida por pausa — disponible sólo tras maniobra */}
           <ValBox label="Cstat★" value={measuredCstat > 0 ? measuredCstat.toFixed(0) : '—'}
